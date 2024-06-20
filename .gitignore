@@ -167,4 +167,6 @@ cython_debug/
 # Numpy
 *.npy
 
+# superfluous data files
 *.pdf
+data*/
