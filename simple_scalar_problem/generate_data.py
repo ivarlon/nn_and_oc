@@ -103,7 +103,7 @@ def generate_data(N,
         return None
     
     # seed RNG
-    if seed is not None:
+    if seed:
         torch.manual_seed(seed)
     
     if addNoise:

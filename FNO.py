@@ -10,13 +10,7 @@ in N points, where N is a power of 2, which lets us use the fast Fourier transfo
 """
 
 import torch
-#from tqdm import trange
 
-"""
-Need:
-    evenly discretised domain (here x_i = i/(N-1), i = 0, 1, ..., N-1)
-    u_i = u(x_i)
-"""
 
 class FNO(torch.nn.Module):
     """
@@ -75,62 +69,3 @@ class FNO(torch.nn.Module):
             v = self.activation(v)
         v = self.proj(v)
         return v
-    
-
-def training_loop(model, optimizer, inputs, targets, boundary_condition, 
-                  weight_boundary=1., 
-                  weight_prior=1.,
-                  train_adjoint=False):
-    loss_fn = torch.nn.MSELoss()
-    loss_t = 0.
-    batch_size = 8
-    n_batches = len(inputs)//batch_size
-    
-    for batch in range(n_batches):
-        optimizer.zero_grad()
-        
-        targets_batch = targets[batch_size*batch:batch_size*(batch+1)]
-        inputs_batch = inputs[batch_size*batch:batch_size*(batch+1)]
-        
-        preds = model(inputs_batch)
-        
-        exp_x = torch.exp(torch.linspace(0.,1., len(inputs[0])))
-        exp_x_ux = torch.einsum('x, bxu->bxu', exp_x, inputs_batch)
-        
-        loss_interior = loss_fn(preds.ravel(), targets_batch.ravel())
-        if train_adjoint:
-            # constrain terminal prediction
-            loss_boundary = torch.mean( torch.mean( (preds[:,-1,:] - boundary_condition)**2 ) )
-        else:
-            # constrain initial condition
-            loss_boundary = torch.mean( torch.mean( (preds[:,0,:] - boundary_condition)**2 ) )
-        #loss_prior = torch.mean( ( preds - 1/exp_x*model(exp_x_ux) )**2 )
-        loss = loss_interior + weight_boundary*loss_boundary #+ weight_prior*loss_prior
-        loss.backward(retain_graph=True)
-        optimizer.step()
-        loss_t += loss.item()
-    loss_t = loss_t/n_batches
-    return loss_t
-
-def train(model, 
-          inputs, 
-          targets, 
-          iterations,
-          lr=1e-3,
-          weight_penalty=0.,
-          weight_boundary=1., 
-          weight_prior=1., 
-          boundary_condition=1.,
-          train_adjoint=False):
-    
-    model.train()
-    optimizer = torch.optim.Adam(params=model.parameters(), lr=lr, weight_decay=weight_penalty)
-    loss_history = []
-    
-    for epoch in range(iterations):
-        loss_t = training_loop(model, optimizer, inputs, targets, 
-                               boundary_condition=boundary_condition,
-                               train_adjoint=train_adjoint,
-                               weight_boundary=weight_boundary, weight_prior=weight_prior)
-        loss_history.append(loss_t)
-    return torch.tensor(loss_history)
