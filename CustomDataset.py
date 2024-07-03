@@ -40,24 +40,28 @@ class DeepONetDataset(Dataset):
                 self.y[idx//self.num_loc_samples, idx%self.num_loc_samples]
 
 class DeepONetDataloader:
-    def __init__(self, dataset, fun_batch_size, loc_batch_size):
+    def __init__(self, dataset, fun_batch_size, loc_batch_size, shuffle=True):
         self.dataset = dataset
         self.num_fun_samples, self.num_loc_samples = dataset.y.shape[:2]
         self.fun_batch_size = fun_batch_size
         self.loc_batch_size = loc_batch_size
+        self.shuffle = shuffle
     
     def __len__(self):
-        return len(self.dataset)
+        N = len(self.dataset)
+        batch_size = self.fun_batch_size*self.loc_batch_size
+        return N//batch_size + N%batch_size # ceil(N/batch_size)
     
     def _generate_indices(self):
         """
         Creates a list of indices for (u,x,y(x)) samples
         """
-        fun_indices = torch.randperm(self.num_fun_samples)
-        loc_indices = torch.stack([torch.randperm(self.num_loc_samples) for i in range(self.num_fun_samples)])
-        #for row_idx in range(self.num_fun_samples):
-        #    row_indices = torch.randperm(self.num_loc_samples)
-        #    indices.extend([row_idx*self.num_fun_samples + j for j in row_indices])
+        if self.shuffle:
+            fun_indices = torch.randperm(self.num_fun_samples)
+            loc_indices = torch.stack([torch.randperm(self.num_loc_samples) for i in range(self.num_fun_samples)])
+        else:
+            fun_indices = torch.arange(self.num_fun_samples)
+            loc_indices = torch.stack([torch.arange(self.num_loc_samples) for i in range(self.num_fun_samples)])
         return fun_indices, loc_indices
     
     def __iter__(self):
@@ -76,3 +80,19 @@ class DeepONetDataloader:
                                          self.dataset.x[loc_idx_batch],
                                          self.dataset.y[fun_idx_batch.unsqueeze(1), loc_idx_batch]))
         return iter(shuffled_batches)
+    
+if __name__=="__main__":
+    # a small sanity check for correct implementation
+    torch.manual_seed(0)
+    num_fun_samples = 4
+    u = torch.arange(num_fun_samples*5).view(num_fun_samples,-1)
+    num_loc_samples = 10
+    x = torch.linspace(0.,1.,num_loc_samples)
+    y = torch.arange(num_fun_samples*num_loc_samples).view(num_fun_samples, num_loc_samples)
+    ds = DeepONetDataset(u,x,y)
+    fun_batch_size, loc_batch_size = (2,3)
+    dl = DeepONetDataloader(ds, fun_batch_size, loc_batch_size, shuffle=False)
+    for i, (u_, x_, y_) in enumerate(dl):
+        print(u_)
+        print(x_)
+        print(y_)
