@@ -35,10 +35,11 @@ class DeepONet(torch.nn.Module):
         
     def forward(self, u, x):
         # u is tensor representing n-valued function evaluated at n_u points, with shape (no. of function samples, n_u*n)
-        # x is tensor representing point in R^m, with shape (no. of input points, m)
+        # x is tensor representing point in R^m, with shape (no.of function samples, no. of input points, m)
+        
         u = torch.stack([branch(u) for branch in self.branch], dim=1) # produces a latent vector for each output dimension (keeping batch as first dimension)
         
         x = self.trunk(x)
         
-        out = torch.einsum('Byi..., bi... -> Bby...', u, x)
+        out = torch.einsum('Byi..., Bbi... -> Bby...', u, x)
         return out
