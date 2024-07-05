@@ -56,4 +56,6 @@ def train(model,
                                train_adjoint=train_adjoint,
                                weight_boundary=weight_boundary, weight_prior=weight_prior)
         loss_history.append(loss_epoch)
+        if epoch%10==0:
+            print("{}/{}".format(epoch,iterations), "Loss:", round(loss_epoch,3))
     return torch.tensor(loss_history)

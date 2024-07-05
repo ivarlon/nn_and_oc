@@ -5,9 +5,18 @@ Implements a DeepONet in Pytorch.
 import torch
 
 class DeepONet(torch.nn.Module):
-    def __init__(self, branch_architecture, trunk_architecture, num_out_channels=1, activation=torch.nn.ReLU()):
+    def __init__(self,
+                 input_size_branch,
+                 input_size_trunk,
+                 branch_architecture,
+                 trunk_architecture,
+                 num_out_channels=1,
+                 activation_branch=torch.nn.ReLU(),
+                 activation_trunk=torch.nn.ReLU()):
         """
-        branch_architecture (list): defines the size of each layer in branch net. The first element must be num_input_channels*num_input_points
+        input_size_branch (int): size of *flattened* branch input u; equal to num_input_channels*num_input_points
+        input_size_trunk (int): size of trunk input x
+        branch_architecture (list): defines the size of each layer in branch net
         trunk_architecture (list): defines the size of each layer in trunk net
         num_out_channels (int): the size of the DeepONet output (1 for scalar outputs)
         activation (element-wise function): activation function between layers
@@ -17,28 +26,58 @@ class DeepONet(torch.nn.Module):
         
         super().__init__()
         
-        # create a branch net for each output dimension
-        branch_layers = [torch.nn.Flatten()]
-        for l in range(1,len(branch_architecture)-1):
-            branch_layers.append(torch.nn.Linear(branch_architecture[l-1],branch_architecture[l]))
-            branch_layers.append(activation)
-        branch_layers.append(torch.nn.Linear(branch_architecture[-2], branch_architecture[-1]))
-        self.branch = torch.nn.ModuleList([torch.nn.Sequential(*branch_layers) for i in range(num_out_channels)])
+        # intialise a branch net for each output dimension
+        branch_nets = []
+        for c in range(num_out_channels):
+            branch_layers = [torch.nn.Flatten()]
+            branch_layers.append(torch.nn.Linear(input_size_branch, branch_architecture[0]))
+            if len(branch_architecture)>1:
+                for l in range(1, len(branch_architecture)):
+                    branch_layers.append(activation_branch)
+                    branch_layers.append(torch.nn.Linear(branch_architecture[l-1],branch_architecture[l]))
+            branch_nets.append( torch.nn.Sequential(*branch_layers) )
+        self.branch = torch.nn.ModuleList(branch_nets)
         
+        # initialise trunk net
         trunk_layers = []
-        for l in range(1,len(trunk_architecture)-1):
-            trunk_layers.append(torch.nn.Linear(trunk_architecture[l-1],trunk_architecture[l]))
-            trunk_layers.append(activation)
-        trunk_layers.append(torch.nn.Linear(trunk_architecture[-2], trunk_architecture[-1]))
+        trunk_layers.append(torch.nn.Linear(input_size_trunk, trunk_architecture[0]))
+        if len(trunk_architecture)>1:
+            for l in range(1,len(trunk_architecture)):
+                trunk_layers.append(activation_trunk)
+                trunk_layers.append(torch.nn.Linear(trunk_architecture[l-1],trunk_architecture[l]))
         self.trunk = torch.nn.Sequential(*trunk_layers)
         
+        # set forward method so that trunk input tensor x has same first dimension as branch input u
+        self.trunk_input_shares_first_dimension_with_branch_input(True)
         
-    def forward(self, u, x):
+    def trunk_input_shares_first_dimension_with_branch_input(self, share):
+        """
+        Alternates the forward method depending on whether
+        trunk input tensor x has a first dimension corresponding to batch dimension
+        of branch input (useful if domain x differs for different branch input u)
+        """
+        if share == True:
+            self.forward = self.forward_share
+        else:
+            self.forward = self.forward_dont_share
+            
+    def forward_share(self, u, x):
         # u is tensor representing n-valued function evaluated at n_u points, with shape (no. of function samples, n_u*n)
         # x is tensor representing point in R^m, with shape (no.of function samples, no. of input points, m)
         u = torch.stack([branch(u) for branch in self.branch], dim=1) # produces a latent vector for each output dimension (keeping batch as first dimension)
         
         x = self.trunk(x)
-        
+        # B: function batch; y: output channel; i: latent dimension; b: domain batch
         out = torch.einsum('Byi..., Bbi... -> Bby...', u, x)
+        return out
+    
+    def forward_dont_share(self, u, x):
+        # forward method for trunk input x the same for every branch sample
+        # u is tensor representing n-valued function evaluated at n_u points, with shape (no. of function samples, n_u*n)
+        # x is tensor representing point in R^m, with shape (no. of input points, m)
+        u = torch.stack([branch(u) for branch in self.branch], dim=1) # produces a latent vector for each output dimension (keeping batch as first dimension)
+        
+        x = self.trunk(x)
+        # B: function batch; y: output channel; i: latent dimension; b: domain batch
+        out = torch.einsum('Byi..., bi... -> Bby...', u, x)
         return out

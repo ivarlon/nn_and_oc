@@ -154,3 +154,7 @@ def generate_data(N,
             data[:,0,...] = y
             data[:,1,...] = p + noise
             return data"""
+
+def normalise_tensor(t, dim):
+    # normalises a tensor along a given dim by subtracting mean and dividing by (uncorrected) std.dev
+    return (t - t.mean(dim=dim, keepdim=True)) / (t.std(dim=dim, keepdim=True) + 1e-6)
