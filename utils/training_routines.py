@@ -5,11 +5,11 @@ Routines for training a pytorch model
 
 import torch
 
-def training_loop(model, optimizer, dataloader, boundary_condition, 
+def training_loop(model, optimizer, dataloader, loss_fn,
+                  boundary_condition, 
                   weight_boundary=1., 
                   weight_prior=1.,
                   train_adjoint=False):
-    loss_fn = torch.nn.MSELoss()
     loss_epoch = 0.
     num_batches = len(dataloader)
     
@@ -33,12 +33,13 @@ def training_loop(model, optimizer, dataloader, boundary_condition,
         loss.backward(retain_graph=True)
         optimizer.step()
         loss_epoch += loss.item()
-    loss_epoch = loss_epoch/num_batches
+    loss_epoch = loss_epoch/len(dataloader.dataset)
     return loss_epoch
 
 def train(model, 
           dataloader, 
           iterations,
+          loss_fn,
           lr=1e-3,
           weight_penalty=0.,
           weight_boundary=1., 

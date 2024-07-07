@@ -60,24 +60,27 @@ elif useDeepONet:
     trunk_architectures = [[100, 50], [200, 100]]
     branch_architectures = [ [200, 50], [200, 200, 50] ]
     input_size_branch = N
-    input_size_trunk = 1
-    architectures = [ ([1000, 800, 100], [200, 100, 100]) ]
+    input_size_trunk = 2
+    architectures = [ ([1200, 1000, 100], [200, 100, 100]) ]
     activation_branch = torch.nn.ReLU()
-    activation_trunk = torch.nn.Sigmoid()
+    activation_trunk = torch.nn.ReLU()
     model_name = "DeepONet"
     x = torch.linspace(0.,1.,N).view(N,-1) # define the domain for the trunk net
-weight_penalties = [0.]#, 1e-2, 1e-3]
+    weight_physics = 0.5
+    def physics_loss(x, y):
+        return 0.
+weight_penalties = [1e-3]#, 1e-2, 1e-3]
 n_models = 1
 
 models_list = []
 loss_histories = []
 
-iterations = 500 # no. of training epochs
+iterations = 400 # no. of training epochs
 
 """
 Generate train and test data
 """
-n_samples = 1000 # total no. of samples
+n_samples = 1500 # total no. of samples
 n_test = int(0.15*n_samples) # no. of test samples
 n_train = n_samples - n_test # no. of training samples
 batch_size = 100 # minibatch size during SGD
@@ -123,22 +126,24 @@ for weight_penalty in [0.]:#weight_penalties:
         for m in range(n_models):
             print("Training model", str(m+1) + "/" + str(n_models))
             data = train_data[m]
-            u_normalised = normalise_tensor(data[:,0], dim=1).unsqueeze(-1)
+            u_normalised = normalise_tensor(data[:,0], dim=1).unsqueeze(-1) # normalises 
             y_train = data[:,1,:,None]
             if useFNO:
                 model = FNO(n_layers, N, d_u, d_v)
                 dataset = BasicDataset(u_normalised, y_train)
                 dataloader = DataLoader(dataset, batch_size=batch_size)
+                loss_fn = torch.nn.MSELoss(reduction="sum")
             else:
                 model = DeepONet(input_size_branch,
                                  input_size_trunk,
                                  branch_architecture,
                                  trunk_architecture,
                                  activation_branch=activation_branch,
-                                 activation_trunk=activation_trunk)
-                dataset = DeepONetDataset(u_normalised, x, y_train)
+                                 activation_trunk=activation_trunk,
+                                 final_activation_trunk=True)
+                dataset = DeepONetDataset(u_normalised, x.repeat((1,2)), y_train)
                 dataloader = DeepONetDataloader(dataset, fun_batch_size=batch_size, loc_batch_size=N//2)
-            
+                loss_fn = torch.nn.MSELoss(reduction="sum") + weight_physics*physics_loss
             model.to(device)
             time_start = time.time()
             loss_history = train(model, 
@@ -154,8 +159,8 @@ for weight_penalty in [0.]:#weight_penalties:
             if useFNO:
                 preds = model(normalise_tensor(u_test[:,:,None], dim=1))
             else:
-                preds = model(normalise_tensor(u_test[:,:,None], dim=1), x.repeat(n_test,1,1))
-            loss_test.append( torch.mean((preds.flatten() - y_test.flatten())**2).item() )
+                preds = model(normalise_tensor(u_test[:,:,None], dim=1), x.repeat(n_test,1,2))
+            loss_test.append( torch.nn.MSELoss()(preds.flatten(), y_test.flatten()).item() )
             #torch.save(model, model_name + str(weight_penalty) + "_" + model_params + "_" + str(m+1) + ".pt")
             #np.save(model_name + "_loss_train_" + str(weight_penalty) + "_" + model_params + "_" + str(m+1) + ".npy", loss_history.detach().numpy())
         #np.save(model_name + "_loss_test_" + str(weight_penalty) + "_" + model_params + ".npy", loss_test)
