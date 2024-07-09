@@ -80,15 +80,15 @@ def generate_controls(x,
     elif basis=="Chebyshev":
         polynomial = lambda coeffs, x: np.polynomial.Chebyshev(coeffs, domain=[0.,1.])(x)
     elif basis=="Legendre":
-        # scale Legendre polynomial i by sqrt(2i + 1) to get normalised
-        polynomial = lambda coeffs, x: np.polynomial.Legendre(torch.sqrt(2*torch.arange(n_coeffs) + 1.)*coeffs, domain=[0.,1.])(x)
+        # possible to scale Legendre polynomial i by sqrt(2i + 1) to get normalised: torch.sqrt(2*torch.arange(n_coeffs))*coeffs
+        polynomial = lambda coeffs, x: np.polynomial.Legendre(coeffs, domain=[0.,1.])(x)
     elif basis=="Bernstein":
         polynomial = lambda coeffs, x: bernstein(coeffs, x)
     else:
         print("Enter a valid polynomial basis")
         return None
     u_coeffs = 2*coeff_range*torch.rand(size=(n_samples,n_coeffs)) - coeff_range
-    u = torch.stack( [polynomial(coeffs,x) for coeffs in u_coeffs] )
+    u = torch.stack( [polynomial(coeffs, x) for coeffs in u_coeffs] )
     return u
 
 def generate_data(N,
