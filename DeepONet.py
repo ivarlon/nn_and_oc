@@ -13,6 +13,7 @@ class DeepONet(torch.nn.Module):
                  num_out_channels=1,
                  activation_branch=torch.nn.ReLU(),
                  activation_trunk=torch.nn.ReLU(),
+                 use_dropout=False,
                  final_activation_trunk=False
                  ):
         """
@@ -32,12 +33,14 @@ class DeepONet(torch.nn.Module):
         
         # intialise a branch net for each output dimension
         branch_nets = []
-        for c in range(num_out_channels):
+        for channel in range(num_out_channels):
             branch_layers = [torch.nn.Flatten()]
             branch_layers.append(torch.nn.Linear(input_size_branch, branch_architecture[0]))
             if len(branch_architecture)>1:
                 for l in range(1, len(branch_architecture)):
                     branch_layers.append(activation_branch)
+                    if use_dropout:
+                        branch_layers.append(torch.nn.Dropout(p=0.5))
                     branch_layers.append(torch.nn.Linear(branch_architecture[l-1],branch_architecture[l]))
             branch_nets.append( torch.nn.Sequential(*branch_layers) )
         self.branch = torch.nn.ModuleList(branch_nets)
@@ -48,6 +51,8 @@ class DeepONet(torch.nn.Module):
         if len(trunk_architecture)>1:
             for l in range(1,len(trunk_architecture)):
                 trunk_layers.append(activation_trunk)
+                if use_dropout:
+                    trunk_layers.append(torch.nn.Dropout(p=0.5))
                 trunk_layers.append(torch.nn.Linear(trunk_architecture[l-1],trunk_architecture[l]))
         if final_activation_trunk:
             trunk_layers.append(activation_trunk)

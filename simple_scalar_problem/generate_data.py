@@ -9,7 +9,7 @@ import numpy as np
 import torch
 
 def solveStateEq(u, y0=1.):
-    N = u.shape[-1]
+    N = u.shape[1]
     y = np.zeros_like(u)
     y[...,0] = y0
     h = 1./(N-1)
@@ -20,16 +20,16 @@ def solveStateEq(u, y0=1.):
     ... """
     # solve by improved forward Euler
     for i in range(N-2):
-        dy_i1 = h*(y[...,i] + u[...,i]) # gradient at yi
-        dy_i2 = h*(y[...,i] + dy_i1 + u[...,i+1]) # approximated gradient at y(x(i+1))
-        y[...,i+1] = y[...,i] + 0.5*(dy_i1 + dy_i2)
-    y[...,-1] = y[...,-2] + h*(y[...,-2] + 0.5*(u[...,-2]+u[...,-1]))
+        dy_i1 = h*(y[:,i] + u[:,i]) # gradient at yi
+        dy_i2 = h*(y[:,i] + dy_i1 + u[:,i+1]) # approximated gradient at y(x(i+1))
+        y[:,i+1] = y[:,i] + 0.5*(dy_i1 + dy_i2)
+    y[:,-1] = y[:,-2] + h*(y[:,-2] + 0.5*(u[:,-2]+u[:,-1]))
     
     return y
     
     
 def solveAdjointEq(y, y_d, pN=0.):
-    N = y.shape[-1]
+    N = y.shape[1]
     p = np.zeros_like(y)
     p[...,-1] = pN
     h = 1./(N-1)
@@ -70,6 +70,27 @@ def bernstein(coeffs, x):
     
     return torch.einsum("c...,c...->...", coeffs, normalised_bernstein)
 
+def generate_controls(x,
+                      basis,
+                      n_samples,
+                      coeff_range,
+                      n_coeffs):
+    if basis=="monomial":
+        polynomial = lambda coeffs, x: np.polynomial.Polynomial(coeffs, domain=[0.,1.])(x)
+    elif basis=="Chebyshev":
+        polynomial = lambda coeffs, x: np.polynomial.Chebyshev(coeffs, domain=[0.,1.])(x)
+    elif basis=="Legendre":
+        # scale Legendre polynomial i by sqrt(2i + 1) to get normalised
+        polynomial = lambda coeffs, x: np.polynomial.Legendre(torch.sqrt(2*torch.arange(n_coeffs) + 1.)*coeffs, domain=[0.,1.])(x)
+    elif basis=="Bernstein":
+        polynomial = lambda coeffs, x: bernstein(coeffs, x)
+    else:
+        print("Enter a valid polynomial basis")
+        return None
+    u_coeffs = 2*coeff_range*torch.rand(size=(n_samples,n_coeffs)) - coeff_range
+    u = torch.stack( [polynomial(coeffs,x) for coeffs in u_coeffs] )
+    return u
+
 def generate_data(N,
                   basis,
                   n_samples=1024,
@@ -85,47 +106,31 @@ def generate_data(N,
     basis (str) : which basis to use for P_n. One of "monomial", "Chebyshev", "Legendre", "Bernstein"
     """
     # set up data array
-    size = (n_samples, 2, N)
-    data = torch.zeros(size=size)
-    x = torch.linspace(0.,1.,N)
     
-    if basis=="monomial":
-        polynomial = lambda coeffs, x: np.polynomial.Polynomial(coeffs, domain=[0.,1.])(x)
-    elif basis=="Chebyshev":
-        polynomial = lambda coeffs, x: np.polynomial.Chebyshev(coeffs, domain=[0.,1.])(x)
-    elif basis=="Legendre":
-        # scale Legendre polynomial i by sqrt(2i + 1) to get normalised
-        polynomial = lambda coeffs, x: np.polynomial.Legendre(torch.sqrt(2*torch.arange(n_coeffs) + 1.)*coeffs, domain=[0.,1.])(x)
-    elif basis=="Bernstein":
-        polynomial = lambda coeffs, x: bernstein(coeffs, x)
-    else:
-        print("Enter a valid polynomial basis")
-        return None
+    data = {}
+    x = torch.linspace(0.,1.,N).view(N,-1)
     
     # seed RNG
     if seed:
         torch.manual_seed(seed)
     
     if addNoise:
-        noise = 1e-2*coeff_range*torch.randn(size=(n_samples, N), dtype=torch.float32)
+        noise = 1e-2*coeff_range*torch.randn(size=(n_samples, N, 1), dtype=torch.float32)
     
     if sampleInputFunctionUniformly:
         
         if not generateAdjoint:
             # generate uniformly sampled u coefficients then calculate the state using numerical integration
-            u_coeffs = 2*coeff_range*torch.rand(size=(n_samples,n_coeffs)) - coeff_range
-            #u = torch.einsum('ij,jk...-> ik...', u_coeffs, basis_fns)
-            u = torch.stack( [polynomial(coeffs,x) for coeffs in u_coeffs] )
+            u = generate_controls(x, basis, n_samples, coeff_range, n_coeffs)
             y = torch.tensor( solveStateEq(u.detach().numpy(),boundary_condition), dtype=torch.float32 )
-            data[:,0,...] = u
-            data[:,1,...] = y + noise
+            data["u"] = u
+            data["x"] = x.view(N,1).repeat(n_samples,1,1)
+            data["y"] = y + noise
             return data
         
         else:
             # generates adjoint p by sampling y uniformly
-            y_coeffs = 2*coeff_range*torch.rand(size=(n_samples,n_coeffs)) - coeff_range
-            #y = torch.einsum('ij,jk...-> ik...', y_coeffs, bernstein_basis)
-            y = torch.stack( [polynomial(coeffs,x) for coeffs in y_coeffs] )
+            y = generate_controls(x, basis, n_samples, coeff_range, n_coeffs)
             p = torch.tensor( solveAdjointEq(y.detach().numpy(), y_d=y_d.detach().numpy(), pN=boundary_condition), dtype=torch.float32 )
             data[:,0,...] = y
             data[:,1,...] = p + noise

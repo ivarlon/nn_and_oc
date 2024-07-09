@@ -77,7 +77,7 @@ class DeepONetDataloader:
                 loc_idx_batch = loc_indices[fun_idx_batch, start_j:end_j]
                 
                 shuffled_batches.append((self.dataset.u[fun_idx_batch], 
-                                         self.dataset.x[loc_idx_batch],
+                                         self.dataset.x[fun_idx_batch.unsqueeze(1), loc_idx_batch],
                                          self.dataset.y[fun_idx_batch.unsqueeze(1), loc_idx_batch]))
         return iter(shuffled_batches)
     
