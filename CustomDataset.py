@@ -32,13 +32,14 @@ class DeepONetDataset(Dataset):
         self.num_loc_samples = len(x)
         
     def __len__(self):
-        return self.y.nelement()
+        return len(self.y)
     
     def __getitem__(self, idx):
-        return self.u[idx//self.num_loc_samples], \
-                self.x[idx%self.num_loc_samples], \
-                self.y[idx//self.num_loc_samples, idx%self.num_loc_samples]
+        return self.u[idx], self.x[idx], self.y[idx]
 
+
+# deprecated
+"""
 class DeepONetDataloader:
     def __init__(self, dataset, fun_batch_size, loc_batch_size, shuffle=True):
         self.dataset = dataset
@@ -53,9 +54,7 @@ class DeepONetDataloader:
         return N//batch_size + N%batch_size # ceil(N/batch_size)
     
     def _generate_indices(self):
-        """
-        Creates a list of indices for (u,x,y(x)) samples
-        """
+        #Creates a list of indices for (u,x,y(x)) samples
         if self.shuffle:
             fun_indices = torch.randperm(self.num_fun_samples)
             loc_indices = torch.stack([torch.randperm(self.num_loc_samples) for i in range(self.num_fun_samples)])
@@ -96,3 +95,4 @@ if __name__=="__main__":
         print(u_)
         print(x_)
         print(y_)
+"""

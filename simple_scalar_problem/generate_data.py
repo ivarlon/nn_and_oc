@@ -20,10 +20,10 @@ def solveStateEq(u, y0=1.):
     ... """
     # solve by improved forward Euler
     for i in range(N-2):
-        dy_i1 = h*(y[:,i] + u[:,i]) # gradient at yi
-        dy_i2 = h*(y[:,i] + dy_i1 + u[:,i+1]) # approximated gradient at y(x(i+1))
+        dy_i1 = h*(-y[:,i] + u[:,i]) # gradient at yi
+        dy_i2 = h*(-(y[:,i] + dy_i1) + u[:,i+1]) # approximated gradient at y(x(i+1))
         y[:,i+1] = y[:,i] + 0.5*(dy_i1 + dy_i2)
-    y[:,-1] = y[:,-2] + h*(y[:,-2] + 0.5*(u[:,-2]+u[:,-1]))
+    y[:,-1] = y[:,-2] + h*(-y[:,-2] + 0.5*(u[:,-2]+u[:,-1]))
     
     return y
     
@@ -36,9 +36,9 @@ def solveAdjointEq(y, y_d, pN=0.):
     # -p' = p + (y-y_d)
     # improved forward Euler (backwards in time)
     for i in range(1,N-1):
-        dp_i1 = h*(p[...,N-i] + (y[...,N-i] - y_d[N-i]) )
-        dp_i2 = h*(p[...,N-i] + dp_i1 - (y[...,N-i-1] - y_d[N-i-1]) )
-        p[...,N-1-i] = p[...,N-i] + 0.5*(dp_i1 + dp_i2)
+        dp_i1 = h*(p[...,N-i] - (y[...,N-i] - y_d[N-i]) )
+        dp_i2 = h*(p[...,N-i] - dp_i1 - (y[...,N-i-1] - y_d[N-i-1]) )
+        p[...,N-1-i] = p[...,N-i] - 0.5*(dp_i1 + dp_i2)
     p[...,0] = p[...,1] + h*(p[...,1] + 0.5*(y[...,1] - y_d[1] + y[...,0] - y_d[0]))
     
     return p
@@ -101,7 +101,7 @@ def generate_data(N,
                   n_coeffs=8, 
                   boundary_condition=1., 
                   seed=None,
-                  addNoise=True):
+                  add_noise=False):
     """
     basis (str) : which basis to use for P_n. One of "monomial", "Chebyshev", "Legendre", "Bernstein"
     """
@@ -114,7 +114,7 @@ def generate_data(N,
     if seed:
         torch.manual_seed(seed)
     
-    if addNoise:
+    if add_noise:
         noise = 1e-2*coeff_range*torch.randn(size=(n_samples, N, 1), dtype=torch.float32)
     
     if sampleInputFunctionUniformly:
@@ -123,17 +123,24 @@ def generate_data(N,
             # generate uniformly sampled u coefficients then calculate the state using numerical integration
             u = generate_controls(x, basis, n_samples, coeff_range, n_coeffs)
             y = torch.tensor( solveStateEq(u.detach().numpy(),boundary_condition), dtype=torch.float32 )
+            if add_noise:
+                noise = 1e-2*coeff_range*torch.randn(size=(n_samples, N, 1), dtype=torch.float32)
+                y += noise
             data["u"] = u
             data["x"] = x.view(N,1).repeat(n_samples,1,1)
-            data["y"] = y + noise
+            data["y"] = y
             return data
         
         else:
             # generates adjoint p by sampling y uniformly
             y = generate_controls(x, basis, n_samples, coeff_range, n_coeffs)
             p = torch.tensor( solveAdjointEq(y.detach().numpy(), y_d=y_d.detach().numpy(), pN=boundary_condition), dtype=torch.float32 )
-            data[:,0,...] = y
-            data[:,1,...] = p + noise
+            if add_noise:
+                noise = 1e-2*coeff_range*torch.randn(size=(n_samples, N, 1), dtype=torch.float32)
+                p += noise
+            data["y"] = y
+            data["x"] = x.view(N,1).repeat(n_samples,1,1)
+            data["p"] = p
             return data
     """
     else:
