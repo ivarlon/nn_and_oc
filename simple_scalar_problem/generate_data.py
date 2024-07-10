@@ -2,13 +2,14 @@
 """
 Created on Mon May 27 16:20:17 2024
 
-Generates data (u_i, y_i) for exponential problem y' = y + u
+Generates data (u_i, y_i) for exponential problem y' = -y + u
 """
 
 import numpy as np
 import torch
 
 def solveStateEq(u, y0=1.):
+    # y' = -y + u
     N = u.shape[1]
     y = np.zeros_like(u)
     y[...,0] = y0
@@ -29,11 +30,11 @@ def solveStateEq(u, y0=1.):
     
     
 def solveAdjointEq(y, y_d, pN=0.):
+    # -p' = -p + (y-y_d)
     N = y.shape[1]
     p = np.zeros_like(y)
     p[...,-1] = pN
     h = 1./(N-1)
-    # -p' = p + (y-y_d)
     # improved forward Euler (backwards in time)
     for i in range(1,N-1):
         dp_i1 = h*(p[...,N-i] - (y[...,N-i] - y_d[N-i]) )
