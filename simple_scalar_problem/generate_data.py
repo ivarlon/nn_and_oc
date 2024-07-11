@@ -2,7 +2,7 @@
 """
 Created on Mon May 27 16:20:17 2024
 
-Generates data (u_i, y_i) for exponential problem y' = -y + u
+Generates data (u_i, y_i) for exponential decay problem y' = -y + u
 """
 
 import numpy as np
@@ -12,7 +12,7 @@ def solveStateEq(u, y0=1.):
     # y' = -y + u
     N = u.shape[1]
     y = np.zeros_like(u)
-    y[...,0] = y0
+    y[:,0] = y0
     h = 1./(N-1)
     """D = np.roll(np.eye(N), 1, axis=1) + (-1)*np.roll(np.eye(N), 1, axis=0)
     D[0,0] = -1.; D[0,-1] = 0.; D[-1,0] = 0.; D[-1,-1] = 1.
@@ -33,14 +33,14 @@ def solveAdjointEq(y, y_d, pN=0.):
     # -p' = -p + (y-y_d)
     N = y.shape[1]
     p = np.zeros_like(y)
-    p[...,-1] = pN
+    p[:,-1] = pN
     h = 1./(N-1)
     # improved forward Euler (backwards in time)
     for i in range(1,N-1):
-        dp_i1 = h*(p[...,N-i] - (y[...,N-i] - y_d[N-i]) )
-        dp_i2 = h*(p[...,N-i] - dp_i1 - (y[...,N-i-1] - y_d[N-i-1]) )
-        p[...,N-1-i] = p[...,N-i] - 0.5*(dp_i1 + dp_i2)
-    p[...,0] = p[...,1] + h*(p[...,1] + 0.5*(y[...,1] - y_d[1] + y[...,0] - y_d[0]))
+        dp_i1 = h*(p[:,N-i] - (y[:,N-i] - y_d[N-i]) )
+        dp_i2 = h*(p[:,N-i] - dp_i1 - (y[:,N-i-1] - y_d[N-i-1]) )
+        p[:,N-1-i] = p[:,N-i] - 0.5*(dp_i1 + dp_i2)
+    p[:,0] = p[:,1] - h*(p[:,1] - 0.5*(y[:,1] - y_d[1] + y[:,0] - y_d[0]))
     
     return p
 

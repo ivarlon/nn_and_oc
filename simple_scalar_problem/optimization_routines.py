@@ -66,7 +66,7 @@ def conjugate_gradient(f, grad_f, x0, eps=1e-4, max_no_iters=10000):
 def linesearch(f,grad_f,p,x,starting_stepsize=4.):
     stepsize = starting_stepsize
     alpha = 0.5e-4 # desired decrease
-    while f(x + stepsize*p) > f(x) + alpha*stepsize*grad_f(x)@p:
+    while f(x + stepsize*p) > f(x) + alpha*stepsize*grad_f(x).ravel()@p.ravel():
         stepsize = 0.5*stepsize # half step size (backtracking)
         if stepsize < 1e-5: # no decrease found
             #print("shucks")
