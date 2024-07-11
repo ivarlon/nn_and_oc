@@ -60,7 +60,7 @@ elif method_state == "NN":
         y = y.detach().numpy()
         return y
 else:
-    print("Please specify a valid state solver method: conventional or NN")
+    assert False, "Please specify a valid state solver method: conventional or NN"
 
 def reduced_cost(u, y_d):
     y = calculate_state(u)
@@ -83,9 +83,10 @@ elif method_gradient == "NN adjoint":
     models["adjoint"] = [torch.load(filename) for filename in filenames]
     
     def calculate_adjoint(y, y_d):
+        y_y_d = torch.tensor(y-y_d, dtype=torch.float32)
         # average over ensemble predictions
-        p = torch.stack([model(torch.tensor(y-y_d, dtype=torch.float32)[None,:,None]) for model in models["adjoint"] ]).mean(axis=0)
-        p = p.detach().numpy().ravel()
+        p = torch.stack([model(y_y_d) for model in models["adjoint"] ]).mean(axis=0)
+        p = p.detach().numpy()
         return p
     
     def gradient_cost(u, y_d):
@@ -107,13 +108,14 @@ elif method_gradient == "NN tangent":
         # Calculate vJp for dNN/du^T (y-y_d)
         calculate_state = lambda u: torch.stack([model(u) for model in models["state"]]).mean(axis=0)
         y, grad_u = torch.func.vjp(calculate_state, u)
-        dJdy_times_dydu = grad_u(y-torch.tensor(y_d))[0].detach().numpy()
+        y_y_d = y-torch.tensor(y_d)
+        dJdy_times_dydu = grad_u(y_y_d)[0].detach().numpy()
         y = y.detach().numpy()
         
         return J_u + dJdy_times_dydu
 
 else:
-    print("Please specify a valid method for obtaining the gradient: conventional adjoint, NN adjoint or NN tangent")
+    assert False, "Please specify a valid adjoint solver method: conventional adjoint, NN adjoint or NN tangent"
 
 
 #====================
@@ -139,6 +141,25 @@ if method_state == "NN":
     plt.plot(x, solveStateEq(u_opt).ravel(), color="red")
 plt.plot(x, y_d.ravel())
 plt.plot(x, u_opt.ravel(), linestyle="--")
-# import gradient descent methods
-# import pytorch state + adjoint models
-# import state and adjoint solvers
+
+
+def taylor_test(J, u, h, J_derivative_h, rtol=1e-4):
+    # J: reduced cost function
+    # u: control, input to J
+    # h: direction in which to compute directional derivative
+    # J_derivative_h: actual directional derivative of J at u in direction h
+    n = 12
+    eps = 1e-3*np.logspace(0,-(n-1),n,base=2.)
+    
+    # compute residuals
+    residuals = np.zeros(n)
+    for i in range(n):
+        Jh = J(u + eps[i]*h)
+        residuals[i] = np.abs(Jh - J(u) - eps[i]*J_derivative_h)
+    
+    # compute convergence rates
+    convergence_rates = np.zeros(n-1)
+    for i in range(n-1):
+        convergence_rates[i] = np.log( residuals[i+1]/residuals[i] ) / np.log( eps[i+1]/eps[i] )
+    print(convergence_rates)    
+    print(np.isclose(convergence_rates, 2., rtol=rtol))
