@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 import torch
 from torch.utils.data import DataLoader
 from FNO import FNO
-from utils.training_routines import train_FNO
+from training_routines import train_FNO
 from CustomDataset import *
 from generate_data import generate_data, generate_controls
 import time # to measure training time
