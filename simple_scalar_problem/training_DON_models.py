@@ -125,7 +125,7 @@ def loss_fn(preds, targets, u, x):
 weight_penalties = [0., 1e-2] # L2 penalty for NN weights
 
 
-iterations = 10 # no. of training epochs
+iterations = 3000 # no. of training epochs
 
 
 """
