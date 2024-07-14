@@ -188,11 +188,7 @@ for weight_penalty in weight_penalties:
         filename_models_list = "models_list_" + model_params + "_" + str(weight_penalty) +  "_" + ".pkl"
         with open(filename_models_list, "wb") as outfile:
             pickle.dump(models_list, outfile)
-        
-            #torch.save(model, model_name + str(weight_penalty) + "_" + model_params + "_" + str(m+1) + ".pt")
-            #np.save(model_name + "_loss_train_" + str(weight_penalty) + "_" + model_params + "_" + str(m+1) + ".npy", loss_history.detach().numpy())
-        #np.save(model_name + "_loss_test_" + str(weight_penalty) + "_" + model_params + ".npy", loss_test)
-        #np.save(model_name + "_training_time_" + model_params + ".npy", training_time)
+        # save training time?
 print("####################################")
 print("#         Training complete.       #")
 print("####################################")
