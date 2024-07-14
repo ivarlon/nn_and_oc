@@ -12,9 +12,9 @@ class DeepONet(torch.nn.Module):
                  trunk_architecture,
                  num_out_channels=1,
                  activation_branch=torch.nn.ReLU(),
-                 activation_trunk=torch.nn.ReLU(),
+                 activation_trunk=torch.nn.Sigmoid(),
                  use_dropout=False,
-                 final_activation_trunk=False
+                 final_activation_trunk=True
                  ):
         """
         input_size_branch (int): size of *flattened* branch input u; equal to num_input_channels*num_input_points
