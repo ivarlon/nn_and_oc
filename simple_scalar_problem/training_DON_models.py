@@ -3,19 +3,20 @@
 Trains Deep Operator Networks (DeepONets)
 """
 
-
+# for saving data
 import sys
-from pathlib import Path
-root = Path(__file__).resolve().parent.parent
-sys.path.append(str(root))
+import os
 import pickle
+import time # to measure training time
+
+# import numerical libraries
 import numpy as np
 import torch
+
+# import custom libraries and functions
 from DeepONet import DeepONet
 from utils.training_routines import train_DON
 from CustomDataset import *
-from generate_data import generate_data, generate_controls
-import time # to measure training time
 
 # seed pytorch RNG
 seed = 1234
@@ -29,14 +30,25 @@ else:
     device = torch.device("cpu")
 
 train_adjoint = False # either train NN to solve adjoint or to solve state
-if train_adjoint:
-    def ODE_interior(y,x,p):
-        dp_x = torch.autograd.grad(outputs=p, inputs=x, grad_outputs=torch.ones_like(p), create_graph=True, retain_graph=True)[0]
-        return -dp_x + p - y.view_as(p)
-else:
+problems = ["exp_decay", "heat_eq", "pendulum"]
+
+from generate_data import generate_data, generate_controls
+
+
+problem_dir = "simple_scalar_problem"
+script_dir = os.path.dirname(os.path.abspath(__file__))
+data_dir = os.path.join(script_dir, problem_dir, 'data')
+
+
+if not train_adjoint:
     def ODE_interior(u,x,y):
         dy_x = torch.autograd.grad(outputs=y, inputs=x, grad_outputs=torch.ones_like(y), create_graph=True, retain_graph=True)[0]
         return dy_x + y - u.view_as(y)
+else:
+    def ODE_interior(y,x,p):
+        # y is y-y_d
+        dp_x = torch.autograd.grad(outputs=p, inputs=x, grad_outputs=torch.ones_like(p), create_graph=True, retain_graph=True)[0]
+        return -dp_x + p - y.view_as(p)
 
 def physics_loss(u, x, y, weight_boundary=1.):
     # y = y(x;u) is output of DeepONet, tensor of shape (n_samples, n_domain_points, dim(Y))
@@ -45,13 +57,12 @@ def physics_loss(u, x, y, weight_boundary=1.):
     boundary_loss = torch.nn.MSELoss()(y[:,0], y0*torch.ones_like(y[:,0]))
     return interior_loss + weight_boundary*boundary_loss
 
-
 N = 64 # number of points x_i
 y0 = 1. # initial condition on state
 pf = 0. # terminal condition on adjoint
 y_d = 1.5*torch.ones(N,1) # desired state for OC
 
-n_models = 5
+n_models = 1
 
 ################################
 # Generate train and test data #
@@ -99,6 +110,7 @@ dataset_val = (u_val.to(device), x_val.to(device), y_val.to(device))
 model_name = "DeepONet"
 input_size_branch = N
 input_size_trunk = 1
+n_conv_layers = 2
 
 final_layer_size1 = 10
 final_layer_size2 = 40
@@ -108,7 +120,7 @@ trunk_hidden_sizes = [5, 10, 50]
 architectures = [ [[branch_hidden_sizes[0],final_layer_size1], [trunk_hidden, final_layer_size1]] for trunk_hidden in trunk_hidden_sizes[:-1]] \
     + [ [ [branch_hidden,final_layer_size2], [trunk_hidden_sizes[-1],final_layer_size2] ] for branch_hidden in branch_hidden_sizes[1:]] \
         + [ [[500, 500, 50], [50, 50]] ]
-#architectures = [([100,10], [10,10])]
+architectures = [([100,10], [20,10])]
 activation_branch = torch.nn.ReLU()
 activation_trunk = torch.nn.Sigmoid()
 
@@ -122,11 +134,12 @@ def loss_fn(preds, targets, u, x):
     loss_data = torch.nn.MSELoss()(preds, targets)
     return weight_physics*loss_physics + weight_data*loss_data
 
-weight_penalties = [0., 1e-2] # L2 penalty for NN weights
+weight_penalties = [0.] # L2 penalty for NN weights
 
 
-iterations = 3000 # no. of training epochs
-
+iterations = 1000 # no. of training epochs
+lr = 3e-3 # learning rate 
+# training loop uses Adam optimizer by default
 
 """
 Train the various models
@@ -155,6 +168,7 @@ for weight_penalty in weight_penalties:
                              activation_branch=activation_branch,
                              activation_trunk=activation_trunk,
                              use_dropout=False,
+                             n_conv_layers=n_conv_layers,
                              final_activation_trunk=True)
             model.to(device)
             time_start = time.time()
@@ -166,29 +180,35 @@ for weight_penalty in weight_penalties:
                                 loss_fn,
                                 batch_size_fun=batch_size_fun,
                                 batch_size_loc=batch_size_loc,
-                                lr=1e-2,
+                                lr=lr,
                                 weight_penalty=weight_penalty)
             time_end = time.time()
             training_time = round(time_end-time_start,1)
+            training_times.append(training_time)
             model.to('cpu')
             models_list.append(model)
             loss_histories.append(loss_history.to('cpu'))
             preds = model(u_test, x_test)
             test_loss.append(loss_fn(preds, y_test, u_test, x_test).item())
             print()
+        
         # save training_loss
         filename_loss_history = "loss_history_" + model_params + "_" + str(weight_penalty) + "_" + model_name + ".pkl"
-        with open(filename_loss_history, "wb") as outfile:
+        with open(os.path.join(data_dir, filename_loss_history), "wb") as outfile:
             pickle.dump(loss_histories, outfile)
         # save test loss
         filename_test_loss = "test_loss_" + model_params + "_" + str(weight_penalty) +  "_" + ".pkl"
-        with open(filename_test_loss, "wb") as outfile:
+        with open(os.path.join(data_dir, filename_test_loss), "wb") as outfile:
             pickle.dump(test_loss, outfile)
         # save models
         filename_models_list = "models_list_" + model_params + "_" + str(weight_penalty) +  "_" + ".pkl"
-        with open(filename_models_list, "wb") as outfile:
+        with open(os.path.join(data_dir, filename_models_list), "wb") as outfile:
             pickle.dump(models_list, outfile)
-        # save training time?
+        # save training time
+        filename_training_times = "training_times_" + model_params + "_" + str(weight_penalty) +  "_" + ".pkl"
+        with open(os.path.join(data_dir, filename_training_times), "wb") as outfile:
+            pickle.dump(training_times, outfile)
+
 print("####################################")
 print("#         Training complete.       #")
 print("####################################")

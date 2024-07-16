@@ -4,6 +4,7 @@ Routines for training a pytorch model
 """
 
 import torch
+torch.set_default_dtype(torch.float32) # all tensors are float32
 from itertools import zip_longest
 
 def validation_step(model, loss_fn, val_data):
@@ -127,12 +128,15 @@ def train_DON(model,
                 loc_idx_batch = loc_indices[fun_idx_batch, j_start:j_end]
                 u_batch = dataset.u[fun_idx_batch]
                 x_batch = dataset.x[fun_idx_batch.unsqueeze(1), loc_idx_batch]
-                y_batch = dataset.y[fun_idx_batch.unsqueeze(1), loc_idx_batch]
+                
+                y_batch = dataset.y.flatten(start_dim=1)[fun_idx_batch.unsqueeze(1), loc_idx_batch].view(batch_size_fun, *dataset.y.shape[1:])
                 
                 # Compute forward pass and loss; update weights
                 preds = model(u_batch, x_batch)
-                u_x = u_batch[torch.arange(batch_size_fun).unsqueeze(1), loc_idx_batch] # get the points that correspond to x_batch and y_batch
+                
+                u_x = u_batch.flatten(start_dim=1)[torch.arange(batch_size_fun).unsqueeze(1), loc_idx_batch].view(batch_size_fun, *dataset.u.shape[1:]) # get the points that correspond to x_batch and y_batch
                 loss = loss_fn(preds, y_batch, u_x, x_batch)
+                
                 loss.backward(retain_graph=True)
                 optimizer.step()
                 loss_epoch += loss.item()
@@ -158,7 +162,7 @@ def train_DON(model,
             best_epoch = epoch
             best_model_params = model.state_dict()
         model.train()
-        if epoch%100==0:
+        if epoch%10==0:
             print("{}/{}".format(epoch,iterations), "Loss:", loss_epoch)
     
     # save the best model parameters

@@ -11,7 +11,7 @@ also a method for a simple Armijo line search (could be expanded to Wolffe searc
 """
 import numpy as np
 
-def grad_descent(f, grad_f, x0, eps=1e-4, max_no_iters=10000):
+def grad_descent(f, grad_f, x0, eps=1e-4, max_no_iters=100):
     x = x0
     cost_history = []
     cost_history.append(f(x0))
@@ -33,7 +33,7 @@ def grad_descent(f, grad_f, x0, eps=1e-4, max_no_iters=10000):
     
     return x, cost_history, grad_history
 
-def conjugate_gradient(f, grad_f, x0, eps=1e-4, max_no_iters=10000):
+def conjugate_gradient(f, grad_f, x0, eps=1e-4, max_no_iters=100):
     x = x0
     cost_history = []
     cost_history.append(f(x0))

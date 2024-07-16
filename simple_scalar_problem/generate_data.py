@@ -33,7 +33,7 @@ def improved_forward_euler(fun, y0, n_points, x_span, u):
     
     return y
 
-def solveStateEq(u, y0=1., batched=True):
+def solve_state_eq(u, y0=1., batched=True):
     # if batched=False, u has shape (N,...)
     # solve ODE y' = -y + u
     state_eq = lambda x, y: -y
@@ -47,7 +47,7 @@ def solveStateEq(u, y0=1., batched=True):
         return y
     
     
-def solveAdjointEq(y, y_d, pf=0., batched=True):
+def solve_adjoint_eq(y, y_d, pf=0., batched=True):
     # if batched=False, y, y_d have shape (N,...)
     # solve ODE -p' = -p + (y-y_d)
     # backwards in time: p(t-1) = p(t) - dt*p' = p(t) + dt (-p')
@@ -56,7 +56,7 @@ def solveAdjointEq(y, y_d, pf=0., batched=True):
         y = y[None,:]
         y_d = y_d[None,:]
     N = y.shape[1]
-    p = improved_forward_euler(adjoint_eq, [pf], n_points=N, x_span=(1.,0.), u=y-y_d)
+    p = improved_forward_euler(adjoint_eq, [pf], n_points=N, x_span=(0.,1.), u=np.flip(y-y_d))
     p = np.flip(p, axis=1)
     if not batched:
         return p[0]
@@ -153,7 +153,7 @@ def generate_data(N,
         if not generate_adjoint:
             # generate uniformly sampled u coefficients then calculate the state using numerical integration
             u = generate_controls(x, basis, n_samples, coeff_range, n_coeffs)
-            y = torch.tensor( solveStateEq(u.detach().numpy(),boundary_condition), dtype=torch.float32 )
+            y = torch.tensor( solve_state_eq(u.detach().numpy(),boundary_condition), dtype=torch.float32 )
             if add_noise:
                 noise = 1e-2*coeff_range*torch.randn(size=(n_samples, N, 1), dtype=torch.float32)
                 y += noise
@@ -165,7 +165,7 @@ def generate_data(N,
         else:
             # generates adjoint p by sampling y uniformly
             y = generate_controls(x, basis, n_samples, coeff_range, n_coeffs)
-            p = torch.tensor( solveAdjointEq(y.detach().numpy(), y_d=y_d.detach().numpy(), pf=boundary_condition), dtype=torch.float32 )
+            p = torch.tensor( solve_adjoint_eq(y.detach().numpy(), y_d=y_d.detach().numpy(), pf=boundary_condition), dtype=torch.float32 )
             if add_noise:
                 noise = 1e-2*coeff_range*torch.randn(size=(n_samples, N, 1), dtype=torch.float32)
                 p += noise

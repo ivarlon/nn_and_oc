@@ -16,6 +16,7 @@ import glob
 from FNO import FNO
 from generate_data import solveStateEq, solveAdjointEq
 from optimization_routines import grad_descent, conjugate_gradient, linesearch
+from scipy.integrate import solve_ivp
 
 model_name = "FNO" # NN model to use (if any)
 models = {} # stores the NN models in a dictionary
@@ -23,18 +24,18 @@ models = {} # stores the NN models in a dictionary
 # available methods: 
 #   state: conventional, NN
 #   adjoint: conventional adjoint, NN adjoint, NN tangent (doesn't calculate adjoint)
-method_state = "NN"
-method_gradient = "NN tangent"
+method_state = "conventional"
+method_gradient = "conventional adjoint"
 
 N = 64 # no. of grid points
 nu = 1e-3 # penalty on control u
-y_d = 1.5*np.ones(shape=(1,N,1)) # desired state
+y_d = 1.5*np.ones(shape=(N)) # desired state
 
 # defining cost function to be minimised
 def cost(y, u, y_d):
     return 0.5*np.sum((y-y_d)**2) + 0.5*nu*np.sum(u**2)
 
-u0 = np.zeros(shape=(1,N,1)) # initial guess
+u0 = np.zeros(shape=(N)) # initial guess
 max_no_iters = 100 # max. no. of optimisation iterations
 
 
@@ -49,6 +50,8 @@ max_no_iters = 100 # max. no. of optimisation iterations
 #---------------
 if method_state == "conventional":
     calculate_state = solveStateEq
+    rhs_state = lambda y, u: -y + u
+    calculate_state = solve_ivp(rhs_state, (0,1), 1., t_eval=np.linspace(0,1,N))
 
 elif method_state == "NN":
     # load saved neural operator models
@@ -126,6 +129,10 @@ else:
 import time
 t0 = time.time()
 
+from scipy.optimize import fmin_cg
+
+res = fmin_cg(lambda u: reduced_cost(u, y_d), u0, fprime=lambda u: gradient_cost(u, y_d))
+
 u_opt, cost_history, grad_history  = grad_descent(lambda u: reduced_cost(u, y_d),
                                          lambda u: gradient_cost(u, y_d),
                                          u0,
@@ -133,6 +140,7 @@ u_opt, cost_history, grad_history  = grad_descent(lambda u: reduced_cost(u, y_d)
 
 print()
 print("Optimisation took", round(time.time() - t0, 1), "secs")
+"""
 y_opt = calculate_state(u_opt)
 x = np.linspace(0.,1.,N)
 plt.plot(x, y_opt.ravel())
@@ -142,7 +150,7 @@ if method_state == "NN":
 plt.plot(x, y_d.ravel())
 plt.plot(x, u_opt.ravel(), linestyle="--")
 
-
+"""
 def taylor_test(J, u, h, J_derivative_h, rtol=1e-4):
     # J: reduced cost function
     # u: control, input to J
