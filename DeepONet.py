@@ -43,6 +43,11 @@ class DeepONet(torch.nn.Module):
             if input_size_trunk == 1:
                 pool = torch.nn.MaxPool1d(kernel_size=2)
                 conv_layer = lambda i: torch.nn.Conv1d(2**i, 2**(i+1), kernel_size=3, padding=1)
+            elif input_size_trunk == 2:
+                pool = torch.nn.MaxPool2d(kernel_size=2)
+                conv_layer = lambda i: torch.nn.Conv2d(2**i, 2**(i+1), kernel_size=3, padding=1)
+            else:
+                assert False, "only 2d trunk inputs supported atm"
             def init_conv_net():
                 conv_layers = []
                 for i in range(n_conv_layers):
