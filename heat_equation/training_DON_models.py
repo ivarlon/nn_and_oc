@@ -28,7 +28,7 @@ torch.manual_seed(seed)
 
 if torch.cuda.is_available():
     print("Using CUDA")
-    device = torch.device("cuda:1")
+    device = torch.device("cuda:0")
 else:
     print("Using CPU")
     device = torch.device("cpu")
@@ -46,15 +46,15 @@ data_dir = os.path.join(script_dir, problem_dir, data_dir_name)
 
 diffusion_coeff = 0.25 # coefficient multiplying curvature term y_xx
 
-N_t = 32 # number of time points t_i
-N_x = 16 # number of spatial points x_j
+N_t = 64 # number of time points t_i
+N_x = 32 # number of spatial points x_j
 
 # time span
-T = 0.02
+T = 0.1
 t0 = 0.; tf = t0 + T
 
 # domain length
-L = 0.1
+L = 0.2
 x0 = 0.; xf = x0 + L
 
 # boundary conditions
@@ -69,13 +69,13 @@ n_models = 1
 # Generate train and test data #
 ################################
 
-n_train = 100 # no. of training samples
-n_test = 10 # no. of test samples
-n_val = 10 # no. of training samples
-batch_size_fun = 50 # minibatch size during SGD
+n_train = 1000 # no. of training samples
+n_test = 100 # no. of test samples
+n_val = 100 # no. of training samples
+batch_size_fun = 100 # minibatch size during SGD
 batch_size_loc = N_x*N_t # no. of minibatch domain points. Get worse performance when not using entire domain :/
-n_t_coeffs = 3
-n_x_coeffs = 3
+n_t_coeffs = 4
+n_x_coeffs = 5
 u_max = 10. # maximum amplitude of control
 
 generate_data_func = lambda n_samples: generate_data(N_t, N_x, t_span=(t0,tf), x_span=(x0,xf),
@@ -162,6 +162,7 @@ def physics_loss(u, x, y, weight_IC=5., weight_BC=1.):
 model_name = "DeepONet"
 input_size_branch = N_x*N_t
 input_size_trunk = 2
+n_conv_layers = 3
 
 final_layer_size1 = 10
 final_layer_size2 = 40
@@ -171,12 +172,12 @@ trunk_hidden_sizes = [5, 10, 50]
 architectures = [ [[branch_hidden_sizes[0],final_layer_size1], [trunk_hidden, final_layer_size1]] for trunk_hidden in trunk_hidden_sizes[:-1]] \
     + [ [ [branch_hidden,final_layer_size2], [trunk_hidden_sizes[-1],final_layer_size2] ] for branch_hidden in branch_hidden_sizes[1:]] \
         + [ [[500, 500, 50], [50, 50]] ]
-architectures = [([100,100,100,40], [80,160,40])]
+architectures = [([100,40], [100,40])]
 activation_branch = torch.nn.ReLU()
 activation_trunk = torch.nn.Sigmoid()
 
 # weights for physics and data loss: loss = w_ph*loss_ph + w_d*loss_d
-weight_physics = 0.3
+weight_physics = 0.5
 weight_data = 1. - weight_physics
 
 
@@ -189,7 +190,7 @@ def loss_fn(preds, targets, u, x):
 weight_penalties = [0.] # L2 penalty for NN weights
 
 
-iterations = 300 # no. of training epochs
+iterations = 1000 # no. of training epochs
 
 
 
@@ -220,6 +221,7 @@ for weight_penalty in weight_penalties:
                              activation_branch=activation_branch,
                              activation_trunk=activation_trunk,
                              use_dropout=False,
+                             n_conv_layers=n_conv_layers,
                              final_activation_trunk=True)
             model.to(device)
             time_start = time.time()
@@ -246,7 +248,8 @@ for weight_penalty in weight_penalties:
             preds = model(u_test, tx_test)
             test_loss.append(loss_fn(preds, y_test, u_test, tx_test).item())
             print()
-        
+        print("Test losses", test_loss)
+        print("R2", [1. - loss/(y_test**2).mean() for loss in test_loss])
         # save training_loss
         filename_loss_history = "loss_history_" + model_params + "_" + str(weight_penalty) + "_" + model_name + ".pkl"
         with open(os.path.join(data_dir, filename_loss_history), "wb") as outfile:

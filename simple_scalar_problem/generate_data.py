@@ -119,7 +119,7 @@ def generate_controls(x,
         print("Enter a valid polynomial basis")
         return None
     u_coeffs = 2*coeff_range*torch.rand(size=(n_samples,n_coeffs)) - coeff_range
-    u = torch.stack( [polynomial(coeffs, x) for coeffs in u_coeffs] )
+    u = torch.stack( [torch.tensor(polynomial(coeffs, x),dtype=torch.float32) for coeffs in u_coeffs] )
     return u
 
 def generate_data(N,
