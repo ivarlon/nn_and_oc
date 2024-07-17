@@ -138,7 +138,7 @@ if not train_adjoint:
         dy_xx = dy_xx.view(y.shape[0], N_t, N_x)
         return dy_t[:,1:,1:-1] - diffusion_coeff*dy_xx[:,1:,1:-1] - u.view_as(dy_t)[:,1:,1:-1]
 
-def physics_loss(u, x, y, weight_IC=5., weight_BC=1.):
+def physics_loss(u, x, y, y_IC, y_BCs, weight_IC=5., weight_BC=1.):
     # y = y(x;u) is output of DeepONet, tensor of shape (n_samples, n_domain_points, dim(Y))
     # x is input tensor and has shape (n_samples, n_domain_points, dim(X))
     interior_loss = (PDE_interior(u, x, y)**2).mean()
@@ -180,9 +180,16 @@ activation_trunk = torch.nn.Sigmoid()
 weight_physics = 0.5
 weight_data = 1. - weight_physics
 
+def loss_fn_CPU(preds, targets, u, x):
+    loss_physics = physics_loss(u,x,preds,y_IC,y_BCs)
+    #print("predsshape", preds.view_as(targets).shape, "targetsshape", targets.shape)
+    loss_data = torch.nn.MSELoss()(preds.view_as(targets), targets)
+    return weight_physics*loss_physics + weight_data*loss_data
 
-def loss_fn(preds, targets, u, x):
-    loss_physics = physics_loss(u,x,preds)
+y_IC = y_IC.to(device)
+y_BCs = (y_BCs[0].to(device), y_BCs[1].to(device))
+def loss_fn_device(preds, targets, u, x):
+    loss_physics = physics_loss(u,x,preds,y_IC,y_BCs)
     #print("predsshape", preds.view_as(targets).shape, "targetsshape", targets.shape)
     loss_data = torch.nn.MSELoss()(preds.view_as(targets), targets)
     return weight_physics*loss_physics + weight_data*loss_data
@@ -190,7 +197,7 @@ def loss_fn(preds, targets, u, x):
 weight_penalties = [0.] # L2 penalty for NN weights
 
 
-iterations = 1000 # no. of training epochs
+iterations = 2000 # no. of training epochs
 
 
 
@@ -233,7 +240,7 @@ for weight_penalty in weight_penalties:
                                 dataset,
                                 dataset_val,
                                 iterations, 
-                                loss_fn,
+                                loss_fn_device,
                                 batch_size_fun=batch_size_fun,
                                 batch_size_loc=batch_size_loc,
                                 lr=3e-3,
