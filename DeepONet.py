@@ -18,7 +18,7 @@ class DeepONet(torch.nn.Module):
                  final_activation_trunk=True
                  ):
         """
-        input_size_branch (int): size of *flattened* branch input u; equal to num_input_channels*num_input_points
+        input_size_branch (int or tuple of ints): size of branch input u; e.g. if u is 2d array needs tuple (N_t,N_x)
         input_size_trunk (int): size of trunk input x
         branch_architecture (list): defines the size of each fully connected layer in branch net
         trunk_architecture (list): defines the size of each layer in trunk net
@@ -31,7 +31,14 @@ class DeepONet(torch.nn.Module):
         """
         
         assert branch_architecture[-1] == trunk_architecture[-1], "size of latent dimension (final layer) must be the same for trunk and branch net"
-        
+        if type(input_size_branch) == tuple:
+            assert len(input_size_branch) == input_size_trunk, "the branch input needs as many dimensions as the size of the trunk input"
+            # get total number of elements in branch input (e.g. N=N_t*N_x)
+            n_elements_branch_input = 1
+            for dim_size in input_size_branch:
+                n_elements_branch_input *= dim_size
+        else:
+            n_elements_branch_input = input_size_branch
         super().__init__()
         
         # check if convolutional branch architecture is to be used
@@ -59,14 +66,17 @@ class DeepONet(torch.nn.Module):
         # intialise a branch net for each output dimension
         
         
-        
         branch_nets = []
         for channel in range(num_out_channels):
-            branch_layers = [torch.nn.Flatten(start_dim=1 + use_convolution, end_dim=-1)]
+            branch_layers = []
             if use_convolution:
                 branch_layers.append(init_conv_net())
-                branch_layers.append(torch.nn.Flatten()) # flattens channel dimension and produces a vector of dim 2^n*input_size_branch/2^n = input_size branch (doubling channels and 2-pooling cancel)
-            branch_layers.append(torch.nn.Linear(input_size_branch, branch_architecture[0]))
+                # flatten channel dimension and produce a vector
+                # of size 2^n*n_elements_branch_input/(2d)^n = n_elements_branch_input/2^d (doubling channels and 2-pooling in d dimensions)
+                branch_layers.append(torch.nn.Flatten()) 
+            else:
+                branch_layers.append(torch.nn.Flatten())
+            branch_layers.append(torch.nn.Linear(n_elements_branch_input//input_size_trunk**n_conv_layers, branch_architecture[0]))
             if len(branch_architecture)>1:
                 for l in range(1, len(branch_architecture)):
                     branch_layers.append(activation_branch)

@@ -160,9 +160,9 @@ def physics_loss(u, x, y, weight_IC=5., weight_BC=1.):
 #######################################
 
 model_name = "DeepONet"
-input_size_branch = N_x*N_t
+input_size_branch = (N_t, N_x)
 input_size_trunk = 2
-n_conv_layers = 3
+n_conv_layers = 2
 
 final_layer_size1 = 10
 final_layer_size2 = 40

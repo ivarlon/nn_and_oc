@@ -17,8 +17,7 @@ def improved_forward_euler(fun, y0, n_points, x_span, u):
     x = np.linspace(x0, xf, n_points)
     
     # set up solution array
-    dim_y = len(y0) # dimension of y
-    y = np.zeros(shape=(n_batches, n_points, dim_y))
+    y = np.zeros(shape=(n_batches, n_points))
     y[:,0] = y0
     
     # step length
@@ -40,7 +39,7 @@ def solve_state_eq(u, y0=1., batched=True):
     if not batched:
         u = u[None,:]
     N = u.shape[1]
-    y = improved_forward_euler(state_eq, [y0], n_points=N, x_span=(0.,1.), u=u)
+    y = improved_forward_euler(state_eq, y0, n_points=N, x_span=(0.,1.), u=u)
     if not batched:
         return y[0]
     else:
@@ -50,7 +49,7 @@ def solve_state_eq(u, y0=1., batched=True):
 def solve_adjoint_eq(y, y_d, pf=0., batched=True):
     # if batched=False, y, y_d have shape (N,...)
     # solve ODE -p' = -p + (y-y_d)
-    # backwards in time: p(t-1) = p(t) - dt*p' = p(t) + dt (-p')
+    # backwards in time: p(t-1) = p(t) - dt*p'
     adjoint_eq = lambda x, p: -p
     if not batched:
         y = y[None,:]
@@ -139,14 +138,14 @@ def generate_data(N,
     # set up data array
     
     data = {}
-    x = torch.linspace(0.,1.,N).view(N,-1)
+    x = torch.linspace(0.,1.,N)
     
     # seed RNG
     if seed:
         torch.manual_seed(seed)
     
     if add_noise:
-        noise = 1e-2*coeff_range*torch.randn(size=(n_samples, N, 1), dtype=torch.float32)
+        noise = 1e-2*coeff_range*torch.randn(size=(n_samples, N), dtype=torch.float32)
     
     if sample_input_function_uniformly:
         
@@ -155,11 +154,11 @@ def generate_data(N,
             u = generate_controls(x, basis, n_samples, coeff_range, n_coeffs)
             y = torch.tensor( solve_state_eq(u.detach().numpy(),boundary_condition), dtype=torch.float32 )
             if add_noise:
-                noise = 1e-2*coeff_range*torch.randn(size=(n_samples, N, 1), dtype=torch.float32)
+                noise = 1e-2*coeff_range*torch.randn(size=(n_samples, N), dtype=torch.float32)
                 y += noise
             data["u"] = u
-            data["x"] = x.view(N,1).repeat(n_samples,1,1)
-            data["y"] = y
+            data["x"] = x.view(N,1).repeat(n_samples,1,1) # add batch axis 0 and axis 2 for dim(x) (=1)
+            data["y"] = y.unsqueeze(-1) # add final singleton axis to match x.shape
             return data
         
         else:
@@ -167,10 +166,10 @@ def generate_data(N,
             y = generate_controls(x, basis, n_samples, coeff_range, n_coeffs)
             p = torch.tensor( solve_adjoint_eq(y.detach().numpy(), y_d=y_d.detach().numpy(), pf=boundary_condition), dtype=torch.float32 )
             if add_noise:
-                noise = 1e-2*coeff_range*torch.randn(size=(n_samples, N, 1), dtype=torch.float32)
+                noise = 1e-2*coeff_range*torch.randn(size=(n_samples, N), dtype=torch.float32)
                 p += noise
             data["y"] = y
-            data["x"] = x.view(N,1).repeat(n_samples,1,1)
+            data["x"] = x.view(N).repeat(n_samples,1)
             data["p"] = p
             return data
     """

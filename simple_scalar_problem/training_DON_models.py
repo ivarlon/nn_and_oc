@@ -17,6 +17,7 @@ import torch
 from DeepONet import DeepONet
 from utils.training_routines import train_DON
 from CustomDataset import *
+from generate_data import generate_data, generate_controls
 
 # seed pytorch RNG
 seed = 1234
@@ -31,8 +32,6 @@ else:
 
 train_adjoint = False # either train NN to solve adjoint or to solve state
 problems = ["exp_decay", "heat_eq", "pendulum"]
-
-from generate_data import generate_data, generate_controls
 
 
 problem_dir = "simple_scalar_problem"
@@ -110,7 +109,7 @@ dataset_val = (u_val.to(device), x_val.to(device), y_val.to(device))
 model_name = "DeepONet"
 input_size_branch = N
 input_size_trunk = 1
-n_conv_layers = 2
+n_conv_layers = 0
 
 final_layer_size1 = 10
 final_layer_size2 = 40
@@ -191,6 +190,9 @@ for weight_penalty in weight_penalties:
             preds = model(u_test, x_test)
             test_loss.append(loss_fn(preds, y_test, u_test, x_test).item())
             print()
+        
+        print("Test losses", test_loss)
+        print("R2", [1. - loss/(y_test**2).mean() for loss in test_loss])
         
         # save training_loss
         filename_loss_history = "loss_history_" + model_params + "_" + str(weight_penalty) + "_" + model_name + ".pkl"
