@@ -46,8 +46,8 @@ data_dir = os.path.join(script_dir, problem_dir, data_dir_name)
 
 diffusion_coeff = 0.25 # coefficient multiplying curvature term y_xx
 
-N_t = 64 # number of time points t_i
-N_x = 32 # number of spatial points x_j
+N_t = 16 # number of time points t_i
+N_x = 8 # number of spatial points x_j
 
 # time span
 T = 0.1
@@ -122,6 +122,8 @@ dataset_val = (val_data["u"].to(device), val_data["tx"].to(device), val_data["y"
 
 
 
+assert False, "hey clown world"
+
 ################
 # physics loss #
 ################
@@ -172,7 +174,7 @@ trunk_hidden_sizes = [5, 10, 50]
 architectures = [ [[branch_hidden_sizes[0],final_layer_size1], [trunk_hidden, final_layer_size1]] for trunk_hidden in trunk_hidden_sizes[:-1]] \
     + [ [ [branch_hidden,final_layer_size2], [trunk_hidden_sizes[-1],final_layer_size2] ] for branch_hidden in branch_hidden_sizes[1:]] \
         + [ [[500, 500, 50], [50, 50]] ]
-architectures = [([100,40], [100,40])]
+architectures = [([100,40], [100,40])] + [ ([200,100,50], [100,50]) ] + [([300,300,100,50], [200,100,50]) ] + [( [50,50,50 ], [50,50 ] )]  
 activation_branch = torch.nn.ReLU()
 activation_trunk = torch.nn.Sigmoid()
 
@@ -181,7 +183,7 @@ weight_physics = 0.5
 weight_data = 1. - weight_physics
 
 def loss_fn_CPU(preds, targets, u, x):
-    loss_physics = physics_loss(u,x,preds,y_IC,y_BCs)
+    loss_physics = physics_loss(u,x,preds,y_IC,to('cpu'),(y_BCs[0].to('cpu'), y_BCs[1].to('cpu')))
     #print("predsshape", preds.view_as(targets).shape, "targetsshape", targets.shape)
     loss_data = torch.nn.MSELoss()(preds.view_as(targets), targets)
     return weight_physics*loss_physics + weight_data*loss_data
@@ -195,84 +197,86 @@ def loss_fn_device(preds, targets, u, x):
     return weight_physics*loss_physics + weight_data*loss_data
 
 weight_penalties = [0.] # L2 penalty for NN weights
+learning_rates = [1e-2, 1e-3, 1e-4]
 
-
-iterations = 2000 # no. of training epochs
+iterations = 5000 # no. of training epochs
 
 
 
 """
 Train the various models
 """
-for weight_penalty in weight_penalties:
-    print("Using weight penalty", weight_penalty, "\n")
-    for architecture in architectures:
-        training_times = [] # measure training time
-        test_loss = [] # save test loss for each model
-        models_list = []
-        loss_histories = []
-        branch_architecture, trunk_architecture = architecture
-        model_params = str(branch_architecture) + "_" + str(trunk_architecture)
-        print("Training with branch architecture", branch_architecture, "\nTrunk architecture", trunk_architecture, "\n")
-        for m in range(n_models):
-            print("Training model", str(m+1) + "/" + str(n_models))
-            data = train_data[m]
-            u_train = data["u"]
-            y_train = data["y"]
-            tx_train = data["tx"]
-            dataset = DeepONetDataset(u_train, tx_train, y_train, device=device)
-            model = DeepONet(input_size_branch,
-                             input_size_trunk,
-                             branch_architecture,
-                             trunk_architecture,
-                             activation_branch=activation_branch,
-                             activation_trunk=activation_trunk,
-                             use_dropout=False,
-                             n_conv_layers=n_conv_layers,
-                             final_activation_trunk=True)
-            model.to(device)
-            time_start = time.time()
-            #with torch.autograd.profiler.profile() as prof:
+for n_conv_layers in [0,2,4]:
+    print("Using", n_conv_layers, "conv layers")
+    for lr in learning_rates:
+        print("Using weight penalty", weight_penalty, "\n")
+        for architecture in architectures:
+            training_times = [] # measure training time
+            test_loss = [] # save test loss for each model
+            models_list = []
+            loss_histories = []
+            branch_architecture, trunk_architecture = architecture
+            model_params = str(branch_architecture) + "_" + str(trunk_architecture)
+            print("Training with branch architecture", branch_architecture, "\nTrunk architecture", trunk_architecture, "\n")
+            for m in range(n_models):
+                print("Training model", str(m+1) + "/" + str(n_models))
+                data = train_data[m]
+                u_train = data["u"]
+                y_train = data["y"]
+                tx_train = data["tx"]
+                dataset = DeepONetDataset(u_train, tx_train, y_train, device=device)
+                model = DeepONet(input_size_branch,
+                                 input_size_trunk,
+                                 branch_architecture,
+                                 trunk_architecture,
+                                 activation_branch=activation_branch,
+                                 activation_trunk=activation_trunk,
+                                 use_dropout=False,
+                                 n_conv_layers=n_conv_layers,
+                                 final_activation_trunk=True)
+                model.to(device)
+                time_start = time.time()
+                #with torch.autograd.profiler.profile() as prof:
+        
     
-
-    
-            loss_history = train_DON(model, 
-                                dataset,
-                                dataset_val,
-                                iterations, 
-                                loss_fn_device,
-                                batch_size_fun=batch_size_fun,
-                                batch_size_loc=batch_size_loc,
-                                lr=3e-3,
-                                weight_penalty=weight_penalty)
-            #print(prof.key_averages().table(sort_by="cpu_time_total"))
-            time_end = time.time()
-            training_time = round(time_end-time_start,1)
-            training_times.append(training_time)
-            model.to('cpu')
-            models_list.append(model)
-            loss_histories.append(loss_history.to('cpu'))
-            preds = model(u_test, tx_test)
-            test_loss.append(loss_fn(preds, y_test, u_test, tx_test).item())
-            print()
-        print("Test losses", test_loss)
-        print("R2", [1. - loss/(y_test**2).mean() for loss in test_loss])
-        # save training_loss
-        filename_loss_history = "loss_history_" + model_params + "_" + str(weight_penalty) + "_" + model_name + ".pkl"
-        with open(os.path.join(data_dir, filename_loss_history), "wb") as outfile:
-            pickle.dump(loss_histories, outfile)
-        # save test loss
-        filename_test_loss = "test_loss_" + model_params + "_" + str(weight_penalty) +  "_" + ".pkl"
-        with open(os.path.join(data_dir, filename_test_loss), "wb") as outfile:
-            pickle.dump(test_loss, outfile)
-        # save models
-        filename_models_list = "models_list_" + model_params + "_" + str(weight_penalty) +  "_" + ".pkl"
-        with open(os.path.join(data_dir, filename_models_list), "wb") as outfile:
-            pickle.dump(models_list, outfile)
-        # save training time
-        filename_training_times = "training_times_" + model_params + "_" + str(weight_penalty) +  "_" + ".pkl"
-        with open(os.path.join(data_dir, filename_training_times), "wb") as outfile:
-            pickle.dump(training_times, outfile)
+        
+                loss_history = train_DON(model, 
+                                    dataset,
+                                    dataset_val,
+                                    iterations, 
+                                    loss_fn_device,
+                                    batch_size_fun=batch_size_fun,
+                                    batch_size_loc=batch_size_loc,
+                                    lr=lr,
+                                    weight_penalty=weight_penalty)
+                #print(prof.key_averages().table(sort_by="cpu_time_total"))
+                time_end = time.time()
+                training_time = round(time_end-time_start,1)
+                training_times.append(training_time)
+                model.to('cpu')
+                models_list.append(model)
+                loss_histories.append(loss_history.to('cpu'))
+                preds = model(u_test, tx_test)
+                test_loss.append(loss_fn_CPU(preds, y_test, u_test, tx_test).item())
+                print()
+            print("Test losses", test_loss)
+            print("R2", [1. - loss/(y_test**2).mean() for loss in test_loss])
+            # save training_loss
+            #filename_loss_history = "loss_history_" + model_params + "_" + str(weight_penalty) + "_" + model_name + ".pkl"
+            #with open(os.path.join(data_dir, filename_loss_history), "wb") as outfile:
+            #    pickle.dump(loss_histories, outfile)
+            # save test loss
+            #filename_test_loss = "test_loss_" + model_params + "_" + str(weight_penalty) +  "_" + ".pkl"
+            #with open(os.path.join(data_dir, filename_test_loss), "wb") as outfile:
+            #    pickle.dump(test_loss, outfile)
+            # save models
+            #filename_models_list = "models_list_" + model_params + "_" + str(weight_penalty) +  "_" + ".pkl"
+            #with open(os.path.join(data_dir, filename_models_list), "wb") as outfile:
+            #    pickle.dump(models_list, outfile)
+            # save training time
+            #filename_training_times = "training_times_" + model_params + "_" + str(weight_penalty) +  "_" + ".pkl"
+            #with open(os.path.join(data_dir, filename_training_times), "wb") as outfile:
+            #    pickle.dump(training_times, outfile)
 
 print("####################################")
 print("#         Training complete.       #")
