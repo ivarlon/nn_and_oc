@@ -37,7 +37,7 @@ def crank_nicolson(y_IC, y_BCs, D, u, t0=0., tf=1., x0=0.,xf=1.):
     for i in range(N_t-1):
         # solve Ay[i+1,interior] = b
         # b:= By[i,interior] + dt/2*(u[i+1]+u[i]) + r(y[i,boundary] + y[i+1,boundary])
-        b = np.einsum('ki, bi', B, y[:,i,1:-1]) + 0.5*dt*(u[:,i+1,1:-1] + u[:,i,1:-1]) + 0.5*r*(BC_arr[i] + BC_arr[i+1])
+        b = np.einsum('kx, bx->bk', B, y[:,i,1:-1]) + 0.5*dt*(u[:,i+1,1:-1] + u[:,i,1:-1]) + 0.5*r*(BC_arr[i] + BC_arr[i+1])
         y[:,i+1,1:-1] = np.linalg.solve(A, b.T).T
     return y
     

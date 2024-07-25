@@ -16,7 +16,6 @@ import numpy as np
 import torch
 from crank_nicolson_heat_eq import crank_nicolson
 
-torch.manual_seed(10)
 
 def solve_state_eq(u, y_IC, y_BCs, D, t_span, x_span, batched=True):
     # if batched=False, u has shape (N_t, N_x,...)
@@ -33,21 +32,14 @@ def solve_state_eq(u, y_IC, y_BCs, D, t_span, x_span, batched=True):
         return y
     
     
-def solve_adjoint_eq(y, y_d, pf=0., batched=True):
-    # if batched=False, y, y_d have shape (N,...)
-    # solve ODE -p' = -p + (y-y_d)
+def solve_adjoint_eq(y, y_d, p_TC, p_BCs, D, t_span, x_span, batched=True):
+    # if batched=False, y, y_d have shape (N_t, N_x,...)
+    # solve ODE -p_t = -Dp_xx + (y-y_d)
     # backwards in time: p(t-1) = p(t) - dt*p' = p(t) + dt (-p')
-    adjoint_eq = lambda x, p: -p
-    if not batched:
-        y = y[None,:]
-        y_d = y_d[None,:]
-    N = y.shape[1]
-    p = improved_forward_euler(adjoint_eq, [pf], n_points=N, x_span=(0.,1.), u=np.flip(y-y_d))
-    p = np.flip(p, axis=1)
-    if not batched:
-        return p[0]
-    else:
-        return p
+    # use the fact that this is equivalent with solving the state equation
+    p = solve_state_eq(y-y_d, p_TC, p_BCs, D, t_span, x_span, batched=batched)
+    p = np.ascontiguousarray(np.flip(p, axis=batched)) # flip time axis and store as new array
+    return p
 
 
 
@@ -85,17 +77,15 @@ def generate_data(N_t,
                   N_x,
                   t_span,
                   x_span,
-                  y_IC=None,
-                  y_BCs=None,
+                  IC=None,
+                  BCs=None,
                   n_t_coeffs=5,
                   n_x_coeffs=5,
                   n_samples=1024,
                   u_max=10.,
-                  diffusion_coeff=0.5,
-                  sample_input_function_uniformly=True,
+                  diffusion_coeff=0.25,
                   generate_adjoint=False,
-                  y_d = None,
-                  boundary_condition=1., 
+                  y_d=None, 
                   seed=None,
                   add_noise=False):
     """
@@ -117,60 +107,74 @@ def generate_data(N_t,
     if add_noise:
         noise = 1e-2*u_max*torch.randn(size=(n_samples, N_t, N_x, 1), dtype=torch.float32)
     
-    if sample_input_function_uniformly:
-        
-        if not generate_adjoint:
-            if y_IC is None:
-                y_IC = np.sin(np.pi/(xf-x0)*x)
-            if y_BCs is None:
-                y_BCs = (np.zeros_like(t), np.zeros_like(t))
-                
-            # generate uniformly sampled u coefficients then calculate the state using numerical integration
-            u = generate_controls(t, x, n_samples, n_t_coeffs, n_x_coeffs, u_max=u_max)
-            y = torch.tensor( solve_state_eq(u.numpy(), y_IC, y_BCs, diffusion_coeff, t_span, x_span), dtype=torch.float32 )
-            if add_noise:
-                y += noise
-            # return u and y as (n_samples, N_t*N_x) shaped arrays
-            data["u"] = u#.flatten(start_dim=1, end_dim=2)
-            data["tx"] = torch.cartesian_prod(t, x)[None].repeat(n_samples,1,1)
-            data["y"] = y#.flatten(start_dim=1, end_dim=2)
-            return data
-        
-        else:
-            # generates adjoint p by sampling y uniformly
-            y = generate_controls(x, basis, n_samples, coeff_range, n_coeffs)
-            p = torch.tensor( solve_adjoint_eq(y.detach().numpy(), y_d=y_d.detach().numpy(), pf=boundary_condition), dtype=torch.float32 )
-            if add_noise:
-                p += noise
-            data["y"] = y
-            data["x"] = x.view(N,1).repeat(n_samples,1,1)
-            data["p"] = p
-            return data
-    """
+    if not generate_adjoint:
+        if IC is None:
+            IC = np.sin(np.pi/(xf-x0)*x)
+        if BCs is None:
+            BCs = (np.zeros_like(t), np.zeros_like(t))
+            
+        # generate uniformly sampled u coefficients then calculate the state using numerical integration
+        u = generate_controls(t, x, n_samples, n_t_coeffs, n_x_coeffs, u_max=u_max)
+        y = torch.tensor( solve_state_eq(u.numpy(), IC, BCs, diffusion_coeff, t_span, x_span), dtype=torch.float32 )
+        if add_noise:
+            y += noise
+        # return u and y as (n_samples, N_t*N_x) shaped arrays
+        data["u"] = u
+        data["tx"] = torch.cartesian_prod(t, x)[None].repeat(n_samples,1,1)
+        data["y"] = y
+        return data
+    
     else:
-        # samples state uniformly and calculates the associated control
-        dbernstein_basis = torch.tensor( [dbernstein_nk_dx(n_coeffs-1,k) for k in range(n_coeffs)], dtype=torch.float32)
-        if not generateAdjoint:
-            # then generate state data: y' = y + u
-            y_coeffs = 2*coeff_range*torch.rand(size=(n_samples,n_coeffs)) - coeff_range
-            y_coeffs[:,-1] = boundary_condition # so that boundary condition y(0) = y0 is met
-            y = torch.einsum('ij,jk...->ik...', y_coeffs, bernstein_basis)
-            dydx = torch.einsum('ij,jk...->ik...', y_coeffs, dbernstein_basis)
-            u = dydx - y
-            data[:,0,...] = u
-            data[:,1,...] = y + noise
-            return data
-        
-        else:
-            # generate adjoint data: -p' = p + (y-y_d)
-            p_coeffs = 2*coeff_range*torch.rand(size=(n_samples,n_coeffs)) - coeff_range
-            p_coeffs[:,0] = boundary_condition # adjoint has terminal condition
-            dpdx = torch.einsum('ij,jk...->ik...', p_coeffs, dbernstein_basis)
-            y = - dpdx - p + y_d
-            data[:,0,...] = y
-            data[:,1,...] = p + noise
-            return data"""
+        if IC is None:
+            IC = np.sin(np.pi/(xf-x0)*x)
+        if BCs is None:
+            BCs = (np.zeros_like(t), np.zeros_like(t))
+        # generates adjoint p by sampling y uniformly and solving adjoint eq for p
+        y = generate_controls(t, x, n_samples, n_t_coeffs, n_x_coeffs, u_max=u_max)
+        p = torch.tensor( solve_adjoint_eq(y.numpy(), y_d, IC, BCs, diffusion_coeff, t_span, x_span), dtype=torch.float32 )
+        if add_noise:
+            p += noise
+        data["y-y_d"] = y-y_d
+        data["tx"] = torch.cartesian_prod(t, x)[None].repeat(n_samples,1,1)
+        data["p"] = p
+        return data
+    
 
-def normalise_tensor(t, dim):
-    # normalises a tensor along a given dim by subtracting mean and dividing by (uncorrected) std.dev
-    return (t - t.mean(dim=dim, keepdim=True)) / (t.std(dim=dim, keepdim=True) + 1e-6)
+def augment_data(data, n_augmented_samples, n_combinations, max_coeff, adjoint=False):
+    # create linear combinations of solutions to get new solutions
+    # returns n_augmented_samples of these lin.combs.
+    # n_combinations (int) : number of solutions to combine
+    # max_coeff (int) : max absolute size of lin.comb. coeffs
+    # adjoint (bool) : must be True if augmenting adjoint data, False if state data
+    
+    if not adjoint:
+        u = data["u"]
+        y = data["y"]
+        n_samples = y.shape[0]
+    else:
+        y_y_d = data["y-y_d"]
+        p = data["p"]
+        n_samples = p.shape[0]
+    tx = data["tx"]
+    
+    assert n_samples > n_combinations, "number of samples must be greater than number of combinations"
+    
+    # index array for which samples to combine
+    idx = torch.stack([ torch.randperm(n_samples)[:n_combinations] for i in range(n_augmented_samples) ])
+    
+    # sample lin.comb. coefficients from
+    coeffs = 2*max_coeff*torch.rand(size=(n_augmented_samples,n_combinations)) - max_coeff
+    
+    # normalise sum of each coeff vector to 1 (to ensure lin. comb. respects boundary conditions)
+    coeffs = coeffs/(coeffs.sum(dim=1, keepdims=True) + 1e-6)
+    if not adjoint:
+        y_aug = torch.einsum('nc..., nc...->n...', coeffs, y[idx] )
+        u_aug = torch.einsum('nc..., nc...->n...', coeffs, u[idx] )
+        data["u"] = torch.cat((u, u_aug))
+        data["y"] = torch.cat((y, y_aug))
+    else:
+        p_aug = torch.einsum('nc..., nc...->n...', coeffs, p[idx] )
+        y_y_d_aug = torch.einsum('nc..., nc...->n...', coeffs, y_y_d[idx] )
+        data["y-y_d"] = torch.cat((y_y_d, y_y_d_aug))
+        data["p"] = torch.cat((p, p_aug))
+    data["tx"] = torch.cat((tx, tx[0].repeat(n_augmented_samples,1,1)))
