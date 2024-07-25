@@ -55,9 +55,6 @@ x0 = 0.; xf = x0 + L
 # boundary conditions
 y_IC = 2.*torch.sin(torch.linspace(0., 2*np.pi, N_x))**2 # initial condition on state is double peak with amplitude 2
 y_BCs = (torch.zeros(N_t), torch.zeros(N_t)) # Dirichlet boundary conditions on state
-# move to device
-y_IC = y_IC.to(device)
-y_BCs = (y_BCs[0].to(device), y_BCs[1].to(device))
 
 y_d = 1.5*torch.sin(torch.linspace(0., np.pi, N_t))**10 # desired state for OC is single peak
 
@@ -168,6 +165,9 @@ weight_physics = 0.5
 weight_data = 1. - weight_physics
 
 # define loss functions (one for CPU evaluation, the other for device (cuda or CPU))
+y_IC = y_IC.to(device)
+y_BCs = (y_BCs[0].to(device), y_BCs[1].to(device))
+
 def loss_fn_CPU(preds, targets, u, x):
     loss_physics = physics_loss(u,x,preds,y_IC.to('cpu'),(y_BCs[0].to('cpu'), y_BCs[1].to('cpu')))
     loss_data = torch.nn.MSELoss()(preds.view_as(targets), targets)
