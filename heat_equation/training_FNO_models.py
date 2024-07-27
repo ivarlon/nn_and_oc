@@ -69,9 +69,9 @@ n_models = 1 # number of models to train
 # Generate train and test data #
 ################################
 
-n_train = 1000 # no. of training samples
-n_test = 100 # no. of test samples
-n_val = 100
+n_train = 3000 # no. of training samples
+n_test = 300 # no. of test samples
+n_val = 300
 batch_size = 100 # minibatch size during SGD
 
 n_t_coeffs = 4
@@ -99,33 +99,28 @@ if different_data:
     train_data = []
     for m in range(n_models):
         data = generate_data_func(n_train)
+        augment_data(data, n_augmented_samples=n_train-2000, n_combinations=5, max_coeff=2)
         train_data.append(data)
 else:
     # use the same training data for all models
     data = data = generate_data_func(n_train)
+    augment_data(data, n_augmented_samples=n_train-2000, n_combinations=5, max_coeff=2)
     train_data = n_models*[data]
 
 # generate test and validation data
 test_data = generate_data_func(200)
-#augment_data(test_data, n_augmented_samples=n_test-200, n_combinations=5, max_coeff=2)
+augment_data(test_data, n_augmented_samples=n_test-200, n_combinations=5, max_coeff=2)
 u_test = flatten_tensors(test_data["u"]); y_test = flatten_tensors(test_data["y"])
 
 val_data = generate_data_func(200)
-#augment_data(val_data, n_augmented_samples=n_val-200, n_combinations=5, max_coeff=2)
+augment_data(val_data, n_augmented_samples=n_val-200, n_combinations=5, max_coeff=2)
 dataset_val = (flatten_tensors(val_data["u"]).to(device), flatten_tensors(test_data["y"]).to(device))
-
-
-training_times = [] # measure training time
-loss_test = [] # save test loss for each model
-
-
 
 
 #######################################
 # Set up and train the various models #
 #######################################
 
-model_name = "FNO"
 d_u = 1 # dimension of input u(x_i): u is an Nxd_u array
 architectures = torch.cartesian_prod(torch.arange(1,4), torch.tensor([1,4,8])) # pairs of (n_layers, d_v)
 architectures = torch.tensor([[3,8]])
@@ -137,56 +132,70 @@ models_list = []
 loss_histories = []
 
 iterations = 1 # no. of training epochs
-lr = 1e-3 # learning rate
+learning_rates = [1e-2] # learning rate
 
 for weight_penalty in weight_penalties:
     print("Using weight penalty", weight_penalty)
-    for architecture in architectures:#[([N, 200, 50], [1,100,50]), ([N, 300, 100], [1,100,100])]:
+    
+    for architecture in architectures:
         n_layers, d_v = architecture
         model_params = str(n_layers.item()) + "_" + str(d_v.item())
         print("Training with parameters", model_params)
-        for m in range(n_models):
-            print("Training model", str(m+1) + "/" + str(n_models))
-            data = train_data[m]
-            u_train = flatten_tensors(data["u"])
-            y_train = flatten_tensors(data["y"])
-            model = FNO(n_layers, N_t*N_x, d_u, d_v)
-            dataset = BasicDataset(u_train, y_train, device=device)
-            dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
-            model.to(device)
-            time_start = time.time()
-            loss_history = train_FNO(model,
-                                dataloader, 
-                                dataset_val,
-                                iterations, 
-                                loss_fn,
-                                lr=lr,
-                                weight_penalty=weight_penalty)
-            time_end = time.time()
-            training_time = round(time_end-time_start,1)
-            model.to('cpu')
-            models_list.append(model)
-            loss_histories.append(loss_history.to('cpu'))
-            preds = model(u_test)
-            loss_test.append( loss_fn(preds, y_test).item() )
+        for lr in learning_rates:
+            models_list = [] # list to store models
             
-            # save training_loss
-            filename_loss_history = "loss_history_" + model_params + "_" + str(lr) + ".pkl"
-            with open(os.path.join(data_dir, filename_loss_history), "wb") as outfile:
-                pickle.dump(loss_histories, outfile)
-            # save test loss
-            filename_test_loss = "test_loss_" + model_params + "_" + str(lr) + ".pkl"
-            with open(os.path.join(data_dir, filename_test_loss), "wb") as outfile:
-                pickle.dump(test_loss, outfile)
-            # save models
-            filename_models_list = "models_list_" + model_params + "_" + str(lr) + ".pkl"
-            with open(os.path.join(data_dir, filename_models_list), "wb") as outfile:
-                pickle.dump(models_list, outfile)
-            # save training time
-            filename_training_times = "training_times_" + model_params + "_" + str(lr) + ".pkl"
-            with open(os.path.join(data_dir, filename_training_times), "wb") as outfile:
-                pickle.dump(training_times, outfile)
-            print()
+            # create metrics dict
+            metrics = dict(test_loss = [], 
+                           R2 = [],
+                           training_times=[])
+            
+            loss_histories = [] # list to store loss histories
+            
+            for m in range(n_models):
+                print("Training model", str(m+1) + "/" + str(n_models))
+                data = train_data[m]
+                u_train = flatten_tensors(data["u"])
+                y_train = flatten_tensors(data["y"])
+                model = FNO(n_layers, N_t*N_x, d_u, d_v)
+                dataset = BasicDataset(u_train, y_train, device=device)
+                dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+                model.to(device)
+                time_start = time.time()
+                loss_history = train_FNO(model,
+                                    dataloader, 
+                                    dataset_val,
+                                    iterations, 
+                                    loss_fn,
+                                    lr=lr,
+                                    weight_penalty=weight_penalty)
+                time_end = time.time()
+                training_time = round(time_end-time_start,1)
+                metrics["training_times"].append(training_time)
+                
+                model.to('cpu')
+                models_list.append(model)
+                
+                loss_histories.append(loss_history.to('cpu'))
+                
+                preds = model(u_test)
+                loss_test = loss_fn(preds, y_test).item()
+                metrics["test_loss"].append(loss_test)
+                metrics["R2"].append( 1. - loss_test/(y_test**2).mean() )
+                
+                # save training_loss
+                filename_loss_history = "loss_history_" + model_params + "_" + str(lr) + ".pkl"
+                with open(os.path.join(data_dir, filename_loss_history), "wb") as outfile:
+                    pickle.dump(loss_histories, outfile)
+                # save metrics
+                filename_metrics = "metrics" + model_params + "_" + str(lr) + ".pkl"
+                with open(os.path.join(data_dir, filename_metrics), "wb") as outfile:
+                    pickle.dump(metrics, outfile)
+                # save models
+                filename_models_list = "models_list_" + model_params + "_" + str(lr) + ".pkl"
+                with open(os.path.join(data_dir, filename_models_list), "wb") as outfile:
+                    pickle.dump(models_list, outfile)
+                
+                print()
 print()
 print("####################################")
 print("#         Training complete.       #")

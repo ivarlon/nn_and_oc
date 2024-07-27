@@ -42,8 +42,8 @@ if not os.path.exists(data_dir):
 
 diffusion_coeff = 0.25 # coefficient multiplying curvature term y_xx
 
-N_t = 64 # number of time points t_i
-N_x = 32 # number of spatial points x_j
+N_t = 16 # number of time points t_i
+N_x = 8 # number of spatial points x_j
 
 # time span
 T = 0.2
@@ -110,9 +110,6 @@ augment_data(val_data, n_augmented_samples=n_val-200, n_combinations=5, max_coef
 val_data["tx"].requires_grad = True
 dataset_val = (val_data["u"].to(device), val_data["tx"].to(device), val_data["y"].to(device))
 
-print(val_data["u"].shape)
-#assert False
-
 
 ################
 # physics loss #
@@ -143,7 +140,7 @@ def physics_loss(u, x, y, y_IC, y_BCs, weight_IC=5., weight_BC=1.):
     
     BC_loss = torch.nn.MSELoss()(y_reshaped[:, :, 0], y_BCs[0].repeat(n_fun_samples,1)) \
         + torch.nn.MSELoss()(y_reshaped[:, :, -1], y_BCs[1].repeat(n_fun_samples,1))
-    #print("haha", interior_loss.dtype, IC_loss.dtype, BC_loss.dtype)
+    
     return interior_loss + weight_IC*IC_loss + weight_BC*BC_loss
 
 
@@ -151,7 +148,6 @@ def physics_loss(u, x, y, y_IC, y_BCs, weight_IC=5., weight_BC=1.):
 # Set up and train the various models #
 #######################################
 
-model_name = "DeepONet"
 input_size_branch = (N_t, N_x)
 input_size_trunk = 2
 n_conv_layers = 0
@@ -169,21 +165,17 @@ weight_data = 1. - weight_physics
 y_IC = y_IC.to(device)
 y_BCs = (y_BCs[0].to(device), y_BCs[1].to(device))
 
-def loss_fn_CPU(preds, targets, u, x):
-    loss_physics = physics_loss(u,x,preds,y_IC.to('cpu'),(y_BCs[0].to('cpu'), y_BCs[1].to('cpu')))
-    loss_data = torch.nn.MSELoss()(preds.view_as(targets), targets)
-    return weight_physics*loss_physics + weight_data*loss_data
 
-def loss_fn_device(preds, targets, u, x):
-    loss_physics = physics_loss(u,x,preds,y_IC,y_BCs)
-    loss_data = torch.nn.MSELoss()(preds.view_as(targets), targets)
-    return weight_physics*loss_physics + weight_data*loss_data
+loss_fn_physics_CPU = lambda preds, targets, u, x: weight_physics * physics_loss(u,x,preds,y_IC.to('cpu'),(y_BCs[0].to('cpu'), y_BCs[1].to('cpu')))
+loss_fn_physics_device = lambda preds, targets, u, x: weight_physics * physics_loss(u,x,preds,y_IC,y_BCs)
+
+loss_fn_data = lambda preds, targets, u, x: weight_data * torch.nn.MSELoss()(preds.view_as(targets), targets)
+
 
 weight_penalty = 0. # L2 penalty for NN weights
 learning_rates = [1e-2]
 
-iterations = 5000 # no. of training epochs
-
+iterations = 1 # no. of training epochs
 
 
 """
@@ -191,16 +183,26 @@ Train the various models
 """
 for n_conv_layers in [0]:
     print("Using", n_conv_layers, "conv layers")
-    for lr in learning_rates:
-        print("Using learning rate", lr, "\n")
-        for architecture in architectures:
-            training_times = [] # measure training time
-            test_loss = [] # save test loss for each model
-            models_list = []
-            loss_histories = []
-            branch_architecture, trunk_architecture = architecture
-            model_params = str(branch_architecture) + "_" + str(trunk_architecture)
-            print("Training with branch architecture", branch_architecture, "\nTrunk architecture", trunk_architecture, "\n")
+    for architecture in architectures:
+        branch_architecture, trunk_architecture = architecture
+        model_params = str(branch_architecture) + "_" + str(trunk_architecture)
+        print("Training with branch architecture", branch_architecture, "\nTrunk architecture", trunk_architecture, "\n")
+        
+        for lr in learning_rates:
+            print("Using learning rate", lr, "\n")
+            
+            models_list = [] # list to store models
+            
+            # create metrics dict
+            metrics = dict(test_loss = [], 
+                           R2 = [],
+                           training_times=[])
+            
+            # create dict to store the training loss histories
+            loss_histories = dict(total = [], 
+                              data = [],
+                              physics = [])
+            
             for m in range(n_models):
                 print("Training model", str(m+1) + "/" + str(n_models))
                 data = train_data[m]
@@ -220,28 +222,38 @@ for n_conv_layers in [0]:
                 model.to(device)
                 time_start = time.time()
                 
-                loss_history = train_DON(model, 
-                                    dataset,
-                                    dataset_val,
-                                    iterations, 
-                                    loss_fn_device,
-                                    batch_size_fun=batch_size_fun,
-                                    batch_size_loc=batch_size_loc,
-                                    lr=lr,
-                                    weight_penalty=weight_penalty)
+                loss_history, loss_data_history, loss_physics_history = train_DON(model, 
+                                                                            dataset,
+                                                                            dataset_val,
+                                                                            iterations, 
+                                                                            loss_fn_data,
+                                                                            loss_fn_physics_device,
+                                                                            batch_size_fun=batch_size_fun,
+                                                                            batch_size_loc=batch_size_loc,
+                                                                            lr=lr,
+                                                                            weight_penalty=weight_penalty)
                 
                 time_end = time.time()
                 training_time = round(time_end-time_start,1)
-                training_times.append(training_time)
+                metrics["training_times"].append(training_time)
+                
                 model.to('cpu')
                 models_list.append(model)
-                loss_histories.append(loss_history.to('cpu'))
+                
+                loss_histories["total"].append(loss_history.to('cpu'))
+                loss_histories["data"].append(loss_data_history.to('cpu'))
+                loss_histories["physics"].append(loss_physics_history.to('cpu'))
+                
                 preds = model(u_test, tx_test)
-                test_loss.append(loss_fn_CPU(preds, y_test, u_test, tx_test).item())
+                test_losses = (loss_fn_physics_CPU(preds, y_test, u_test, tx_test).item(), loss_fn_data(preds, y_test, u_test, tx_test).item())
+                metrics["test_loss"].append(test_losses)
+                metrics["R2"].append( 1. - np.sum(test_losses)/(y_test**2).mean() )
+                
                 print()
-            print("Test losses", test_loss)
-            print("R2", [1. - loss/(y_test**2).mean() for loss in test_loss])
+            print("Test losses", metrics["test_loss"])
+            print("R2", metrics["R2"])
             # save training_loss
+            """
             filename_loss_history = "loss_history_" + model_params + "_" + str(lr) + ".pkl"
             with open(os.path.join(data_dir, filename_loss_history), "wb") as outfile:
                 pickle.dump(loss_histories, outfile)
@@ -257,7 +269,7 @@ for n_conv_layers in [0]:
             filename_training_times = "training_times_" + model_params + "_" + str(lr) + ".pkl"
             with open(os.path.join(data_dir, filename_training_times), "wb") as outfile:
                 pickle.dump(training_times, outfile)
-            print()
+            print()"""
 print()
 print("####################################")
 print("#         Training complete.       #")

@@ -7,12 +7,14 @@ import torch
 torch.set_default_dtype(torch.float32) # all tensors are float32
 from itertools import zip_longest
 
-def validation_step(model, loss_fn, val_data):
+def validation_step(model, loss_fns, val_data):
     # val_data = (u,x,y) for DON or (u,y) for FNO
     targets = val_data[-1]
     inputs = val_data[:-1]
     preds = model(*inputs)
-    val_loss = loss_fn(preds, targets, *inputs)
+    val_loss = 0.
+    for loss_fn in loss_fns:
+        val_loss += loss_fn(preds, targets, *inputs)
     return val_loss.item()
 
 def train_FNO(model,
@@ -48,7 +50,7 @@ def train_FNO(model,
         loss_epoch = loss_epoch/len(dataloader)
         return loss_epoch
     
-    best_val_loss = validation_step(model, lambda preds, targets, inputs: loss_fn(preds, targets), dataset_val)
+    best_val_loss = validation_step(model, (lambda preds, targets, inputs: loss_fn(preds, targets),), dataset_val)
     best_epoch = 0
     best_model_params = model.state_dict()
     
@@ -63,7 +65,7 @@ def train_FNO(model,
         loss_history.append(loss_epoch)
         
         # compute validation loss
-        val_loss = validation_step(model, lambda preds, targets, inputs: loss_fn(preds, targets), dataset_val)
+        val_loss = validation_step(model, (lambda preds, targets, inputs: loss_fn(preds, targets),), dataset_val)
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             best_epoch = epoch
@@ -75,13 +77,14 @@ def train_FNO(model,
     print("Lowest validation error at epoch", best_epoch, ":", best_val_loss)
     model.load_state_dict(best_model_params)
     
-    return loss_history
+    return torch.tensor(loss_history)
 
 def train_DON(model,
           dataset, 
           dataset_val,
           iterations,
-          loss_fn,
+          loss_fn_data,
+          loss_fn_physics,
           batch_size_fun=None,
           batch_size_loc=None,
           lr=1e-3,
@@ -95,7 +98,7 @@ def train_DON(model,
     # lr (float) : learning rate
     # weight_penalty (float) : L2 weight penalty
     
-    best_val_loss = validation_step(model, loss_fn, dataset_val)
+    best_val_loss = validation_step(model, (loss_fn_data, loss_fn_physics), dataset_val)
     best_epoch = 0
     best_model_params = model.state_dict()
     
@@ -112,6 +115,8 @@ def train_DON(model,
     
     def training_loop(model, optimizer):
         loss_epoch = 0.
+        loss_data_epoch = 0.
+        loss_physics_epoch = 0.
         
         # Create a list of indices for (u,x,y(x)) samples
         fun_indices = torch.randperm(n_fun_samples)
@@ -135,28 +140,40 @@ def train_DON(model,
                 preds = model(u_batch, x_batch)
                 
                 u_x = u_batch.flatten(start_dim=1)[torch.arange(batch_size_fun).unsqueeze(1), loc_idx_batch].view(batch_size_fun, *dataset.u.shape[1:]) # get the points that correspond to x_batch and y_batch
-                loss = loss_fn(preds, y_batch, u_x, x_batch)
                 
+                loss_data = loss_fn_data(preds, y_batch, u_x, x_batch)
+                loss_physics = loss_fn_physics(preds, y_batch, u_x, x_batch)
+                loss = loss_data + loss_physics
                 loss.backward(retain_graph=True)
+                
                 optimizer.step()
+                
                 loss_epoch += loss.item()
+                loss_data_epoch += loss_data.item()
+                loss_physics_epoch += loss_physics.item()
         
         # Compute the mean loss over minibatches
         loss_epoch = loss_epoch/(n_fun_batches*n_loc_batches)
-        return loss_epoch
+        loss_data_epoch = loss_data_epoch/(n_fun_batches*n_loc_batches)
+        loss_physics_epoch = loss_physics_epoch/(n_fun_batches*n_loc_batches)
+        return loss_epoch, loss_data_epoch, loss_physics_epoch
     
     # set-up for training
     model.train()
     optimizer = torch.optim.Adam(params=model.parameters(), lr=lr, weight_decay=weight_penalty)
     loss_history = []
+    loss_data_history = []
+    loss_physics_history = []
     
     # training loop
     for epoch in range(iterations):
-        loss_epoch = training_loop(model, optimizer)
+        loss_epoch, loss_data_epoch, loss_physics_epoch = training_loop(model, optimizer)
         loss_history.append(loss_epoch)
+        loss_data_history.append(loss_data_epoch)
+        loss_physics_history.append(loss_physics_epoch)
         model.eval()
         # compute validation loss
-        val_loss = validation_step(model, loss_fn, dataset_val)
+        val_loss = validation_step(model, (loss_fn_data, loss_fn_physics), dataset_val)
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             best_epoch = epoch
@@ -169,4 +186,4 @@ def train_DON(model,
     print("Lowest validation error at epoch", best_epoch, ":", best_val_loss)
     model.load_state_dict(best_model_params)
     
-    return torch.tensor(loss_history)
+    return torch.tensor(loss_history), torch.tensor(loss_data_history), torch.tensor(loss_physics_history)
