@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Trains Deep Operator Networks (DeepONets)
+Trains Deep Operator Networks (DeepONets) to solve heat equation
 """
 
 # for saving data
@@ -31,13 +31,14 @@ else:
     print("Using CPU\n")
     device = torch.device("cpu")
 
-
-data_dir_name = 'state_experiments'
-
-
-problem_dir = "heat_equation"
+# create data directory to store models and results
+data_dir_name = 'state_experiments_DON'
+problem_dir_name = "heat_equation"
 script_dir = os.path.dirname(os.path.abspath(__file__))
-data_dir = os.path.join(script_dir, problem_dir, data_dir_name)
+data_dir = os.path.join(script_dir, problem_dir_name, data_dir_name)
+if not os.path.exists(data_dir):
+        os.makedirs(data_dir)
+
 
 diffusion_coeff = 0.25 # coefficient multiplying curvature term y_xx
 
@@ -241,21 +242,22 @@ for n_conv_layers in [0]:
             print("Test losses", test_loss)
             print("R2", [1. - loss/(y_test**2).mean() for loss in test_loss])
             # save training_loss
-            #filename_loss_history = "loss_history_" + model_params + "_" + str(weight_penalty) + "_" + model_name + ".pkl"
-            #with open(os.path.join(data_dir, filename_loss_history), "wb") as outfile:
-            #    pickle.dump(loss_histories, outfile)
+            filename_loss_history = "loss_history_" + model_params + "_" + str(lr) + ".pkl"
+            with open(os.path.join(data_dir, filename_loss_history), "wb") as outfile:
+                pickle.dump(loss_histories, outfile)
             # save test loss
-            #filename_test_loss = "test_loss_" + model_params + "_" + str(weight_penalty) +  "_" + ".pkl"
-            #with open(os.path.join(data_dir, filename_test_loss), "wb") as outfile:
-            #    pickle.dump(test_loss, outfile)
+            filename_test_loss = "test_loss_" + model_params + "_" + str(lr) + ".pkl"
+            with open(os.path.join(data_dir, filename_test_loss), "wb") as outfile:
+                pickle.dump(test_loss, outfile)
             # save models
-            #filename_models_list = "models_list_" + model_params + "_" + str(weight_penalty) +  "_" + ".pkl"
-            #with open(os.path.join(data_dir, filename_models_list), "wb") as outfile:
-            #    pickle.dump(models_list, outfile)
+            filename_models_list = "models_list_" + model_params + "_" + str(lr) + ".pkl"
+            with open(os.path.join(data_dir, filename_models_list), "wb") as outfile:
+                pickle.dump(models_list, outfile)
             # save training time
-            #filename_training_times = "training_times_" + model_params + "_" + str(weight_penalty) +  "_" + ".pkl"
-            #with open(os.path.join(data_dir, filename_training_times), "wb") as outfile:
-            #    pickle.dump(training_times, outfile)
+            filename_training_times = "training_times_" + model_params + "_" + str(lr) + ".pkl"
+            with open(os.path.join(data_dir, filename_training_times), "wb") as outfile:
+                pickle.dump(training_times, outfile)
+            print()
 print()
 print("####################################")
 print("#         Training complete.       #")

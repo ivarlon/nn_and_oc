@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+    # -*- coding: utf-8 -*-
 """
 Implements the Crank-Nicolson scheme to solve the heat equation.
 """

@@ -59,7 +59,8 @@ class FNO(torch.nn.Module):
         
     def forward(self, u):
         # calculates forward pass u --> NN(u)
-        # u is pytorch tensor of size (n_batches, N, d_u)
+        # u is pytorch tensor of size (n_batches, (size of input dimensions), d_u)
+        u = u.flatten(start_dim=1, end_dim=-2) # flattens input dimensions
         v = self.lift(u)
         for l in range(self.n_layers):
             v_ = torch.fft.rfft(v,dim=1)[:,:self.k_max] # do real FT over rows, truncate at k_max
