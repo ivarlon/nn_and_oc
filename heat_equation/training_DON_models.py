@@ -252,8 +252,8 @@ for n_conv_layers in [0]:
                 print()
             print("Test losses", metrics["test_loss"])
             print("R2", metrics["R2"])
+
             # save training_loss
-            """
             filename_loss_history = "loss_history_" + model_params + "_" + str(lr) + ".pkl"
             with open(os.path.join(data_dir, filename_loss_history), "wb") as outfile:
                 pickle.dump(loss_histories, outfile)
@@ -269,7 +269,8 @@ for n_conv_layers in [0]:
             filename_training_times = "training_times_" + model_params + "_" + str(lr) + ".pkl"
             with open(os.path.join(data_dir, filename_training_times), "wb") as outfile:
                 pickle.dump(training_times, outfile)
-            print()"""
+            
+            print()
 print()
 print("####################################")
 print("#         Training complete.       #")
