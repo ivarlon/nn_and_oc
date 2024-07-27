@@ -37,7 +37,6 @@ problem_dir_name = "heat_equation"
 script_dir = os.path.dirname(os.path.abspath(__file__))
 data_dir = os.path.join(script_dir, problem_dir_name, data_dir_name)
 if not os.path.exists(data_dir):
-    print("wuuuut")
     os.makedirs(data_dir)
 
 
@@ -128,7 +127,7 @@ def PDE_interior(y,x,p):
     dp_xx = dp_xx[...,1]
     dp_t = dp_t.view(p.shape[0], N_t, N_x)
     dp_xx = dp_xx.view(p.shape[0], N_t, N_x)
-    return dp_t[:,1:,1:-1] - diffusion_coeff*dp_xx[:,1:,1:-1] - y.view_as(dp_t)[:,1:,1:-1]
+    return dp_t[:,:-1,1:-1] + diffusion_coeff*dp_xx[:,:-1,1:-1] + y.view_as(dp_t)[:,:-1,1:-1]
 
 def physics_loss(y, x, p, p_TC, p_BCs, weight_TC=5., weight_BC=1.):
     # p = p(x;y) is output of DeepONet, tensor of shape (n_samples, n_domain_points, dim(p))
