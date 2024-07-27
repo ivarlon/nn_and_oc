@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Trains Deep Operator Networks (DeepONets) to solve heat equation
+Trains Deep Operator Networks (DeepONets) to solve adjoint eq. for control of heat eq.
 """
 
 # for saving data
@@ -32,12 +32,13 @@ else:
     device = torch.device("cpu")
 
 # create data directory to store models and results
-data_dir_name = 'state_experiments_DON'
+data_dir_name = 'adjoint_experiments_DON'
 problem_dir_name = "heat_equation"
 script_dir = os.path.dirname(os.path.abspath(__file__))
 data_dir = os.path.join(script_dir, problem_dir_name, data_dir_name)
 if not os.path.exists(data_dir):
-        os.makedirs(data_dir)
+    print("wuuuut")
+    os.makedirs(data_dir)
 
 
 diffusion_coeff = 0.25 # coefficient multiplying curvature term y_xx
@@ -54,10 +55,10 @@ L = 0.1
 x0 = 0.; xf = x0 + L
 
 # boundary conditions
-y_IC = 2.*torch.sin(torch.linspace(0., 2*np.pi, N_x))**2 # initial condition on state is double peak with amplitude 2
-y_BCs = (torch.zeros(N_t), torch.zeros(N_t)) # Dirichlet boundary conditions on state
+p_TC = 2.*torch.sin(torch.linspace(0., 2*np.pi, N_x))**2 # terminal condition on adjoint is zero
+p_BCs = (torch.zeros(N_t), torch.zeros(N_t)) # zero Dirichlet boundary conditions
 
-y_d = 1.5*torch.sin(torch.linspace(0., np.pi, N_t))**10 # desired state for OC is single peak
+y_d = 1.5*torch.sin(torch.meshgrid(torch.linspace(0., np.pi, N_t), torch.zeros(N_x))[0])**10 # desired state for OC is single peak
 
 n_models = 10
 
@@ -75,73 +76,75 @@ n_x_coeffs = 5
 u_max = 10. # maximum amplitude of control
 
 generate_data_func = lambda n_samples: generate_data(N_t, N_x, t_span=(t0,tf), x_span=(x0,xf),
-                  IC=y_IC,
-                  BCs=y_BCs,
+                  IC=p_TC,
+                  BCs=p_BCs,
                   n_t_coeffs=n_t_coeffs,
                   n_x_coeffs=n_x_coeffs,
                   n_samples=n_samples,
                   u_max=u_max,
                   diffusion_coeff=diffusion_coeff,
-                  generate_adjoint=False)
+                  y_d=y_d.numpy(),
+                  generate_adjoint=True)
 
 # generate different data for different models?
 different_data = False
 if different_data:
     train_data = []
     for m in range(n_models):
-        data = generate_data_func(1000)
-        augment_data(data, n_augmented_samples=n_train-1000, n_combinations=5, max_coeff=2)
+        data = generate_data_func(2000)
+        augment_data(data, n_augmented_samples=n_train-2000, n_combinations=5, max_coeff=2, adjoint=True)
         data["tx"].requires_grad = True
         train_data.append(data)
 else:
     # use the same training data for all models
-    data = generate_data_func(1000)
+    data = generate_data_func(2000)
+    augment_data(data, n_augmented_samples=n_train-2000, n_combinations=5, max_coeff=2, adjoint=True)
     data["tx"].requires_grad = True
     train_data = n_models*[data]
 
 # generate test and validation data
 test_data = generate_data_func(200)
-augment_data(test_data, n_augmented_samples=n_test-200, n_combinations=5, max_coeff=2)
+augment_data(test_data, n_augmented_samples=n_test-200, n_combinations=5, max_coeff=2, adjoint=True)
 test_data["tx"].requires_grad = True
-u_test = test_data["u"]; tx_test = test_data["tx"]; y_test = test_data["y"]
+y_y_d_test = test_data["y-y_d"]; tx_test = test_data["tx"]; p_test = test_data["p"]
 
 val_data = generate_data_func(200)
-augment_data(val_data, n_augmented_samples=n_val-200, n_combinations=5, max_coeff=2)
+augment_data(val_data, n_augmented_samples=n_val-200, n_combinations=5, max_coeff=2, adjoint=True)
 val_data["tx"].requires_grad = True
-dataset_val = (val_data["u"].to(device), val_data["tx"].to(device), val_data["y"].to(device))
+dataset_val = (val_data["y-y_d"].to(device), val_data["tx"].to(device), val_data["p"].to(device))
 
 
 ################
 # physics loss #
 ################
 
-def PDE_interior(u,x,y):
-    # u is size (n_fun_samples, N_t*N_x)
-    # x is size (n_fun_samples, N_t*N_x, 2)
+def PDE_interior(y,x,p):
     # y is size (n_fun_samples, N_t*N_x)
-    dy = torch.autograd.grad(outputs=y, inputs=x, grad_outputs=torch.ones_like(y), create_graph=True, retain_graph=True)[0]
-    dy_t = dy[...,0]
-    dy_xx = torch.autograd.grad(outputs=dy[...,1], inputs=x, grad_outputs=torch.ones_like(dy[...,1]), create_graph=True, retain_graph=True)[0]
-    dy_xx = dy_xx[...,1]
-    dy_t = dy_t.view(y.shape[0], N_t, N_x)
-    dy_xx = dy_xx.view(y.shape[0], N_t, N_x)
-    return dy_t[:,1:,1:-1] - diffusion_coeff*dy_xx[:,1:,1:-1] - u.view_as(dy_t)[:,1:,1:-1]
+    # x is size (n_fun_samples, N_t*N_x, 2)
+    # p is size (n_fun_samples, N_t*N_x)
+    dp = torch.autograd.grad(outputs=p, inputs=x, grad_outputs=torch.ones_like(p), create_graph=True, retain_graph=True)[0]
+    dp_t = dp[...,0]
+    dp_xx = torch.autograd.grad(outputs=dp[...,1], inputs=x, grad_outputs=torch.ones_like(dp[...,1]), create_graph=True, retain_graph=True)[0]
+    dp_xx = dp_xx[...,1]
+    dp_t = dp_t.view(p.shape[0], N_t, N_x)
+    dp_xx = dp_xx.view(p.shape[0], N_t, N_x)
+    return dp_t[:,1:,1:-1] - diffusion_coeff*dp_xx[:,1:,1:-1] - y.view_as(dp_t)[:,1:,1:-1]
 
-def physics_loss(u, x, y, y_IC, y_BCs, weight_IC=5., weight_BC=1.):
-    # y = y(x;u) is output of DeepONet, tensor of shape (n_samples, n_domain_points, dim(Y))
+def physics_loss(y, x, p, p_TC, p_BCs, weight_TC=5., weight_BC=1.):
+    # p = p(x;y) is output of DeepONet, tensor of shape (n_samples, n_domain_points, dim(p))
     # x is input tensor and has shape (n_samples, n_domain_points, dim(X))
-    interior_loss = (PDE_interior(u, x, y)**2).mean()
+    interior_loss = (PDE_interior(y, x, p)**2).mean()
     
-    n_fun_samples = y.shape[0]
-    y_reshaped = y.view(n_fun_samples, N_t, N_x) # (n_samples, N_t, N_x)
+    n_fun_samples = p.shape[0]
+    p_reshaped = p.view(n_fun_samples, N_t, N_x) # (n_samples, N_t, N_x)
     
-    y_IC_tensor = y_IC.repeat(n_fun_samples, 1)
-    IC_loss = torch.nn.MSELoss()(y_reshaped[:, 0], y_IC_tensor)
+    p_TC_tensor = p_TC.repeat(n_fun_samples, 1)
+    TC_loss = torch.nn.MSELoss()(p_reshaped[:, -1], p_TC_tensor)
     
-    BC_loss = torch.nn.MSELoss()(y_reshaped[:, :, 0], y_BCs[0].repeat(n_fun_samples,1)) \
-        + torch.nn.MSELoss()(y_reshaped[:, :, -1], y_BCs[1].repeat(n_fun_samples,1))
+    BC_loss = torch.nn.MSELoss()(p_reshaped[:, :, 0], p_BCs[0].repeat(n_fun_samples,1)) \
+        + torch.nn.MSELoss()(p_reshaped[:, :, -1], p_BCs[1].repeat(n_fun_samples,1))
     
-    return interior_loss + weight_IC*IC_loss + weight_BC*BC_loss
+    return interior_loss + weight_TC*TC_loss + weight_BC*BC_loss
 
 
 #######################################
@@ -162,14 +165,14 @@ weight_physics = 0.5
 weight_data = 1. - weight_physics
 
 # define loss functions (one for CPU evaluation, the other for device (cuda or CPU))
-y_IC = y_IC.to(device)
-y_BCs = (y_BCs[0].to(device), y_BCs[1].to(device))
+p_TC = p_TC.to(device)
+p_BCs = (p_BCs[0].to(device), p_BCs[1].to(device))
 
 
-loss_fn_physics_CPU = lambda preds, targets, u, x: weight_physics * physics_loss(u,x,preds,y_IC.to('cpu'),(y_BCs[0].to('cpu'), y_BCs[1].to('cpu')))
-loss_fn_physics_device = lambda preds, targets, u, x: weight_physics * physics_loss(u,x,preds,y_IC,y_BCs)
+loss_fn_physics_CPU = lambda preds, targets, y, x: weight_physics * physics_loss(y,x,preds,p_TC.to('cpu'),(p_BCs[0].to('cpu'), p_BCs[1].to('cpu')))
+loss_fn_physics_device = lambda preds, targets, y, x: weight_physics * physics_loss(y,x,preds,p_TC,p_BCs)
 
-loss_fn_data = lambda preds, targets, u, x: weight_data * torch.nn.MSELoss()(preds.view_as(targets), targets)
+loss_fn_data = lambda preds, targets, y, x: weight_data * torch.nn.MSELoss()(preds.view_as(targets), targets)
 
 
 weight_penalty = 0. # L2 penalty for NN weights
@@ -206,10 +209,10 @@ for n_conv_layers in [0]:
             for m in range(n_models):
                 print("Training model", str(m+1) + "/" + str(n_models))
                 data = train_data[m]
-                u_train = data["u"]
-                y_train = data["y"]
+                y_y_d_train = data["y-y_d"]
+                p_train = data["p"]
                 tx_train = data["tx"]
-                dataset = DeepONetDataset(u_train, tx_train, y_train, device=device)
+                dataset = DeepONetDataset(y_y_d_train, tx_train, p_train, device=device)
                 model = DeepONet(input_size_branch,
                                  input_size_trunk,
                                  branch_architecture,
@@ -244,16 +247,16 @@ for n_conv_layers in [0]:
                 loss_histories["data"].append(loss_data_history.to('cpu'))
                 loss_histories["physics"].append(loss_physics_history.to('cpu'))
                 
-                preds = model(u_test, tx_test)
-                test_losses = (loss_fn_physics_CPU(preds, y_test, u_test, tx_test).item(), loss_fn_data(preds, y_test, u_test, tx_test).item())
+                preds = model(y_y_d_test, tx_test)
+                test_losses = (loss_fn_physics_CPU(preds, p_test, y_y_d_test, tx_test).item(), loss_fn_data(preds, p_test, y_y_d_test, tx_test).item())
                 metrics["test_loss"].append(test_losses)
-                metrics["R2"].append( 1. - sum(test_losses)/(y_test**2).mean() )
+                metrics["R2"].append( 1. - sum(test_losses)/(p_test**2).mean() )
                 
                 print()
             print("Test losses", metrics["test_loss"])
             print("R2", metrics["R2"])
             # save training_loss
-            """
+            
             filename_loss_history = "loss_history_" + model_params + "_" + str(lr) + ".pkl"
             with open(os.path.join(data_dir, filename_loss_history), "wb") as outfile:
                 pickle.dump(loss_histories, outfile)
@@ -269,7 +272,8 @@ for n_conv_layers in [0]:
             filename_training_times = "training_times_" + model_params + "_" + str(lr) + ".pkl"
             with open(os.path.join(data_dir, filename_training_times), "wb") as outfile:
                 pickle.dump(training_times, outfile)
-            print()"""
+            
+            print()
 print()
 print("####################################")
 print("#         Training complete.       #")

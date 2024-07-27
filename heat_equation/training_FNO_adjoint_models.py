@@ -61,7 +61,7 @@ p_BCs = (torch.zeros(N_t), torch.zeros(N_t)) # zero Dirichlet boundary condition
 
 y_d = 1.5*torch.sin(torch.meshgrid(torch.linspace(0., np.pi, N_t), torch.zeros(N_x))[0])**10 # desired state for OC is single peak
 
-n_models = 1 # number of models to train
+n_models = 10 # number of models to train
 
 
 ################################
@@ -129,7 +129,7 @@ loss_fn = torch.nn.MSELoss()
 
 weight_penalties = [0]#, 1e-2, 1e-3]
 
-iterations = 1 # no. of training epochs
+iterations = 5000 # no. of training epochs
 learning_rates = [1e-2] # learning rates
 
 for weight_penalty in weight_penalties:

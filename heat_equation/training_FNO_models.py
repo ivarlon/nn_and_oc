@@ -45,8 +45,8 @@ if not os.path.exists(data_dir):
 
 diffusion_coeff = 0.25 # coefficient multiplying curvature term y_xx
 
-N_t = 16 # number of time points t_i
-N_x = 8 # number of spatial points x_j
+N_t = 64 # number of time points t_i
+N_x = 32 # number of spatial points x_j
 
 # time span
 T = 0.2
@@ -62,16 +62,16 @@ y_BCs = (torch.zeros(N_t), torch.zeros(N_t)) # Dirichlet boundary conditions on 
 
 y_d = 1.5*torch.sin(torch.linspace(0., np.pi, N_t))**10 # desired state for OC is single peak
 
-n_models = 1 # number of models to train
+n_models = 10 # number of models to train
 
 
 ################################
 # Generate train and test data #
 ################################
 
-n_train = 3000 # no. of training samples
-n_test = 300 # no. of test samples
-n_val = 300
+n_train = 5000 # no. of training samples
+n_test = 500 # no. of test samples
+n_val = 500
 batch_size = 100 # minibatch size during SGD
 
 n_t_coeffs = 4
@@ -131,7 +131,7 @@ weight_penalties = [0]#, 1e-2, 1e-3]
 models_list = []
 loss_histories = []
 
-iterations = 1 # no. of training epochs
+iterations = 5000 # no. of training epochs
 learning_rates = [1e-2] # learning rate
 
 for weight_penalty in weight_penalties:
