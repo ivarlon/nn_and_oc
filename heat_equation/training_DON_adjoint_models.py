@@ -54,7 +54,7 @@ L = 0.1
 x0 = 0.; xf = x0 + L
 
 # boundary conditions
-p_TC = 2.*torch.sin(torch.linspace(0., 2*np.pi, N_x))**2 # terminal condition on adjoint is zero
+p_TC = torch.zeros(N_x) # terminal condition on adjoint is zero
 p_BCs = (torch.zeros(N_t), torch.zeros(N_t)) # zero Dirichlet boundary conditions
 
 y_d = 1.5*torch.sin(torch.meshgrid(torch.linspace(0., np.pi, N_t), torch.zeros(N_x))[0])**10 # desired state for OC is single peak
