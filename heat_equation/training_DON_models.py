@@ -89,24 +89,25 @@ different_data = False
 if different_data:
     train_data = []
     for m in range(n_models):
-        data = generate_data_func(1000)
-        augment_data(data, n_augmented_samples=n_train-1000, n_combinations=5, max_coeff=2)
+        data = generate_data_func(n_train-2000)
+        augment_data(data, n_augmented_samples=2000, n_combinations=5, max_coeff=2)
         data["tx"].requires_grad = True
         train_data.append(data)
 else:
     # use the same training data for all models
-    data = generate_data_func(1000)
+    data = generate_data_func(n_train-2000)
+    augment_data(data, n_augmented_samples=2000, n_combinations=5, max_coeff=2)
     data["tx"].requires_grad = True
     train_data = n_models*[data]
 
 # generate test and validation data
-test_data = generate_data_func(200)
-augment_data(test_data, n_augmented_samples=n_test-200, n_combinations=5, max_coeff=2)
+test_data = generate_data_func(n_test-200)
+augment_data(test_data, n_augmented_samples=200, n_combinations=5, max_coeff=2)
 test_data["tx"].requires_grad = True
 u_test = test_data["u"]; tx_test = test_data["tx"]; y_test = test_data["y"]
 
-val_data = generate_data_func(200)
-augment_data(val_data, n_augmented_samples=n_val-200, n_combinations=5, max_coeff=2)
+val_data = generate_data_func(n_val-200)
+augment_data(val_data, n_augmented_samples=200, n_combinations=5, max_coeff=2)
 val_data["tx"].requires_grad = True
 dataset_val = (val_data["u"].to(device), val_data["tx"].to(device), val_data["y"].to(device))
 
@@ -175,7 +176,7 @@ loss_fn_data = lambda preds, targets, u, x: weight_data * torch.nn.MSELoss()(pre
 weight_penalty = 0. # L2 penalty for NN weights
 learning_rates = [1e-2]
 
-iterations = 5000 # no. of training epochs
+iterations = 8000 # no. of training epochs
 
 
 """
@@ -257,18 +258,14 @@ for n_conv_layers in [0]:
             filename_loss_history = "loss_history_" + model_params + "_" + str(lr) + ".pkl"
             with open(os.path.join(data_dir, filename_loss_history), "wb") as outfile:
                 pickle.dump(loss_histories, outfile)
-            # save test loss
-            filename_test_loss = "test_loss_" + model_params + "_" + str(lr) + ".pkl"
-            with open(os.path.join(data_dir, filename_test_loss), "wb") as outfile:
-                pickle.dump(test_loss, outfile)
+            # save metrics
+            filename_metrics = "metrics_" + model_params + "_" + str(lr) + ".pkl"
+            with open(os.path.join(data_dir, filename_metrics), "wb") as outfile:
+                pickle.dump(metrics, outfile)
             # save models
             filename_models_list = "models_list_" + model_params + "_" + str(lr) + ".pkl"
             with open(os.path.join(data_dir, filename_models_list), "wb") as outfile:
                 pickle.dump(models_list, outfile)
-            # save training time
-            filename_training_times = "training_times_" + model_params + "_" + str(lr) + ".pkl"
-            with open(os.path.join(data_dir, filename_training_times), "wb") as outfile:
-                pickle.dump(training_times, outfile)
             
             print()
 print()

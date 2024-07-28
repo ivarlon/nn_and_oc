@@ -98,22 +98,22 @@ different_data = True
 if different_data:
     train_data = []
     for m in range(n_models):
-        data = generate_data_func(2000)
-        augment_data(data, n_augmented_samples=n_train-2000, n_combinations=5, max_coeff=2, adjoint=True)
+        data = generate_data_func(n_train-2000)
+        augment_data(data, n_augmented_samples=2000, n_combinations=5, max_coeff=2, adjoint=True)
         train_data.append(data)
 else:
     # use the same training data for all models
-    data = data = generate_data_func(2000)
-    augment_data(data, n_augmented_samples=n_train-2000, n_combinations=5, max_coeff=2, adjoint=True)
+    data = data = generate_data_func(n_train-2000)
+    augment_data(data, n_augmented_samples=2000, n_combinations=5, max_coeff=2, adjoint=True)
     train_data = n_models*[data]
 
 # generate test and validation data
-test_data = generate_data_func(200)
-augment_data(test_data, n_augmented_samples=n_test-200, n_combinations=5, max_coeff=2, adjoint=True)
+test_data = generate_data_func(n_test-200)
+augment_data(test_data, n_augmented_samples=200, n_combinations=5, max_coeff=2, adjoint=True)
 y_y_d_test = flatten_tensors(test_data["y-y_d"]); p_test = flatten_tensors(test_data["p"])
 
-val_data = generate_data_func(200)
-augment_data(val_data, n_augmented_samples=n_val-200, n_combinations=5, max_coeff=2, adjoint=True)
+val_data = generate_data_func(n_val-200)
+augment_data(val_data, n_augmented_samples=200, n_combinations=5, max_coeff=2, adjoint=True)
 dataset_val = (flatten_tensors(val_data["y-y_d"]).to(device), flatten_tensors(test_data["p"]).to(device))
 
 
@@ -129,7 +129,7 @@ loss_fn = torch.nn.MSELoss()
 
 weight_penalties = [0]#, 1e-2, 1e-3]
 
-iterations = 5000 # no. of training epochs
+iterations = 8000 # no. of training epochs
 learning_rates = [1e-2] # learning rates
 
 for weight_penalty in weight_penalties:

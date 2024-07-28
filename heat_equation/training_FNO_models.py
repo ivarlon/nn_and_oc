@@ -98,22 +98,22 @@ different_data = True
 if different_data:
     train_data = []
     for m in range(n_models):
-        data = generate_data_func(n_train)
-        augment_data(data, n_augmented_samples=n_train-2000, n_combinations=5, max_coeff=2)
+        data = generate_data_func(n_train-2000)
+        augment_data(data, n_augmented_samples=2000, n_combinations=5, max_coeff=2)
         train_data.append(data)
 else:
     # use the same training data for all models
-    data = data = generate_data_func(n_train)
-    augment_data(data, n_augmented_samples=n_train-2000, n_combinations=5, max_coeff=2)
+    data = data = generate_data_func(n_train-2000)
+    augment_data(data, n_augmented_samples=2000, n_combinations=5, max_coeff=2)
     train_data = n_models*[data]
 
 # generate test and validation data
-test_data = generate_data_func(200)
-augment_data(test_data, n_augmented_samples=n_test-200, n_combinations=5, max_coeff=2)
+test_data = generate_data_func(n_test-200)
+augment_data(test_data, n_augmented_samples=200, n_combinations=5, max_coeff=2)
 u_test = flatten_tensors(test_data["u"]); y_test = flatten_tensors(test_data["y"])
 
-val_data = generate_data_func(200)
-augment_data(val_data, n_augmented_samples=n_val-200, n_combinations=5, max_coeff=2)
+val_data = generate_data_func(n_val-200)
+augment_data(val_data, n_augmented_samples=200, n_combinations=5, max_coeff=2)
 dataset_val = (flatten_tensors(val_data["u"]).to(device), flatten_tensors(test_data["y"]).to(device))
 
 
@@ -131,7 +131,7 @@ weight_penalties = [0]#, 1e-2, 1e-3]
 models_list = []
 loss_histories = []
 
-iterations = 5000 # no. of training epochs
+iterations = 8000 # no. of training epochs
 learning_rates = [1e-2] # learning rate
 
 for weight_penalty in weight_penalties:
@@ -187,7 +187,7 @@ for weight_penalty in weight_penalties:
                 with open(os.path.join(data_dir, filename_loss_history), "wb") as outfile:
                     pickle.dump(loss_histories, outfile)
                 # save metrics
-                filename_metrics = "metrics" + model_params + "_" + str(lr) + ".pkl"
+                filename_metrics = "metrics_" + model_params + "_" + str(lr) + ".pkl"
                 with open(os.path.join(data_dir, filename_metrics), "wb") as outfile:
                     pickle.dump(metrics, outfile)
                 # save models
