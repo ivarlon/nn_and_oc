@@ -21,11 +21,11 @@ def solve_state_eq(u, y_IC, y_BCs, D, t_span, x_span, batched=True):
     # if batched=False, u has shape (N_t, N_x,...)
     # solve PDE y_t = D*y_xx + u
     t0, tf = t_span
-    x0, fx = x_span
+    x0, xf = x_span
     if not batched:
         u = u[None,:]
     
-    y = crank_nicolson(y_IC, y_BCs, D, u, t0=0., tf=1., x0=0.,xf=1)
+    y = crank_nicolson(y_IC, y_BCs, D, u, t0=t0, tf=tf, x0=x0,xf=xf)
     if not batched:
         return y[0]
     else:
@@ -83,13 +83,14 @@ def generate_data(N_t,
                   n_x_coeffs=5,
                   n_samples=1024,
                   u_max=10.,
-                  diffusion_coeff=0.25,
+                  diffusion_coeff=1e-2,
                   generate_adjoint=False,
                   y_d=None, 
                   seed=None,
-                  add_noise=False):
+                  add_noise=False,
+                  refinement=100):
     """
-    basis (str) : which basis to use for P_n. One of "monomial", "Chebyshev", "Legendre", "Bernstein"
+    refinement (int) : determines how fine the domain discretisation is during data generation. Returned data are coarsened to correspond to N_x, N_t
     """
     # set up data array
     data = {}
@@ -97,8 +98,8 @@ def generate_data(N_t,
     # domain
     t0, tf = t_span
     x0, xf = x_span
-    t = torch.linspace(0.,1.,N_t).view(N_t)
-    x = torch.linspace(0.,1.,N_x).view(N_x)
+    t = torch.linspace(t0,tf,refinement*N_t).view(refinement*N_t)
+    x = torch.linspace(x0,xf,refinement*N_x).view(refinement*N_x)
     
     # seed RNG
     if seed:
