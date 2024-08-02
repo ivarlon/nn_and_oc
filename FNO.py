@@ -20,21 +20,25 @@ class FNO(torch.nn.Module):
         N (int) : number of grid points. N should be a power of 2
         d_u (int) : dimensionality of input u(x_i)
         d_v (int) : dimensionality of lifted input
+        d_y (int) : dimensionality of output
         k_max (int) : max. wave number used by FNO
     """
     
-    def __init__(self, n_layers, N, d_u, d_v, k_max=6):
+    def __init__(self, n_layers, N, d_u, d_v, d_y=None, k_max=6):
         super().__init__()
         
         self.n_layers = n_layers
         self.N = N
         self.k_max = min(k_max, N) # FNO ignores wave numbers above k_max. k_max should not exceed no. of points N
+        if d_y is None:
+            d_y = d_u
+        
         
         # initial lifting operator
         self.lift = torch.nn.Linear(d_u, d_v)
         
         # final projection operator
-        self.proj = torch.nn.Linear(d_v, d_u)
+        self.proj = torch.nn.Linear(d_v, d_y)
         
         # create a Fourier kernel for each k_i, i = 0, ..., N-1
         self.kernel_params = torch.nn.Parameter( torch.normal(mean=0.,
