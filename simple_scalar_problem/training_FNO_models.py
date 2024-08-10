@@ -129,7 +129,7 @@ for weight_penalty in weight_penalties:
                 u_train = data["u"].unsqueeze(-1)
                 y_train = data["y"]
                 model = FNO(n_layers, N, d_u, d_v)
-                dataset = BasicDataset(u_train, y_train)
+                dataset = BasicDataset(u_train, y_train, device=device)
                 dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
                 model.to(device)
                 time_start = time.time()
