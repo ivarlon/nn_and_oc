@@ -37,7 +37,7 @@ def solve_state_eq(u, y0=1., batched=True):
     # solve ODE y' = -y + u
     state_eq = lambda x, y: -y
     if not batched:
-        u = u[None,:]
+        u = u[None]
     N = u.shape[1]
     y = improved_forward_euler(state_eq, y0, n_points=N, x_span=(0.,1.), u=u)
     if not batched:
@@ -52,53 +52,17 @@ def solve_adjoint_eq(y, y_d, pf=0., batched=True):
     # backwards in time: p(t-1) = p(t) - dt*p'
     adjoint_eq = lambda x, p: -p
     if not batched:
-        y = y[None,:]
-        y_d = y_d[None,:]
+        y = y[None]
+        y_d = y_d[None]
+    else:
+        y_d = y_d[None]
     N = y.shape[1]
     p = improved_forward_euler(adjoint_eq, [pf], n_points=N, x_span=(0.,1.), u=np.flip(y-y_d))
-    p = np.flip(p, axis=1)
+    p = np.ascontiguousarray( np.flip(p, axis=1) )
     if not batched:
         return p[0]
     else:
         return p
-
-def normalised_bernstein(coeffs, x):
-    # returns Bernstein basis for P_{n_coeffs-1}
-    
-    n_coeffs = coeffs.shape[-1]
-    n = n_coeffs - 1
-    
-    # define Bernstein polynomials
-    binom_coeff = lambda n, k: np.prod([(n-i)/(k-i) for i in range(k)] ) 
-    bernstein_nk = lambda n, k: binom_coeff(n,k) * x**k * (1.-x)**(n-k)
-    
-    # define matrix of normalisation factors: normalised b_i is a lin. comb. of non-normalised B_k
-    normalisation_factors = torch.stack([ np.sqrt(2*(n-i)+1)*
-            torch.tensor([ (-1)**k * binom_coeff(2*n+1-k, i-k)*binom_coeff(i,k)/binom_coeff(n-k, i-k) for k in range(i+1)] + [0. for k in range(i+1,n_coeffs)], dtype=torch.float32)
-            for i in range(n_coeffs)])
-    # define corresponding matrix of non-orthonormal b.stein basis pol.s
-    non_normalised_bstein = torch.stack([
-            torch.stack([ bernstein_nk(n-k, i-k) for k in range(i+1)] + [torch.zeros_like(x) for k in range(i+1,n_coeffs)]) 
-            for i in range(n_coeffs)])
-    
-    # define orthonormal b.stein basis
-    normalised_bstein = torch.einsum("ij...,ij...->i...", normalisation_factors, non_normalised_bstein)
-    
-    return torch.einsum("c...,c...->...", coeffs, normalised_bstein)
-
-def bernstein(coeffs):
-    # returns Bernstein basis for P_{n_coeffs-1}
-    
-    n_coeffs = coeffs.shape[-1]
-    n = n_coeffs - 1
-    
-    # define Bernstein polynomials
-    binom_coeff = lambda n, k: np.prod([(n-i)/(k-i) for i in range(k)] ) 
-    bernstein_nk = lambda n, k, x: binom_coeff(n,k) * x**k * (1.-x)**(n-k)
-    
-    bstein = torch.stack([
-            torch.stack([ bernstein_nk(n-k, i-k) for k in range(i+1)] + [torch.zeros_like(x) for k in range(i+1,n_coeffs)]) 
-            for i in range(n_coeffs)])
 
 def generate_controls(x,
                       basis,
@@ -112,8 +76,6 @@ def generate_controls(x,
     elif basis=="Legendre":
         # possible to scale Legendre polynomial i by sqrt(2i + 1) to get normalised: torch.sqrt(2*torch.arange(n_coeffs))*coeffs
         polynomial = lambda coeffs, x: np.polynomial.Legendre(coeffs, domain=[0.,1.])(x)
-    elif basis=="Bernstein":
-        polynomial = lambda coeffs, x: bernstein(coeffs, x)
     else:
         print("Enter a valid polynomial basis")
         return None
@@ -147,56 +109,67 @@ def generate_data(N,
     if add_noise:
         noise = 1e-2*coeff_range*torch.randn(size=(n_samples, N), dtype=torch.float32)
     
-    if sample_input_function_uniformly:
-        
-        if not generate_adjoint:
-            # generate uniformly sampled u coefficients then calculate the state using numerical integration
-            u = generate_controls(x, basis, n_samples, coeff_range, n_coeffs)
-            y = torch.tensor( solve_state_eq(u.detach().numpy(),boundary_condition), dtype=torch.float32 )
-            if add_noise:
-                noise = 1e-2*coeff_range*torch.randn(size=(n_samples, N), dtype=torch.float32)
-                y += noise
-            data["u"] = u
-            data["x"] = x.view(N,1).repeat(n_samples,1,1) # add batch axis 0 and axis 2 for dim(x) (=1)
-            data["y"] = y.unsqueeze(-1) # add final singleton axis to match x.shape
-            return data
-        
-        else:
-            # generates adjoint p by sampling y uniformly
-            y = generate_controls(x, basis, n_samples, coeff_range, n_coeffs)
-            p = torch.tensor( solve_adjoint_eq(y.detach().numpy(), y_d=y_d.detach().numpy(), pf=boundary_condition), dtype=torch.float32 )
-            if add_noise:
-                noise = 1e-2*coeff_range*torch.randn(size=(n_samples, N), dtype=torch.float32)
-                p += noise
-            data["y"] = y
-            data["x"] = x.view(N).repeat(n_samples,1)
-            data["p"] = p
-            return data
-    """
+    if not generate_adjoint:
+        # generate uniformly sampled u coefficients then calculate the state using numerical integration
+        u = generate_controls(x, basis, n_samples, coeff_range, n_coeffs)
+        y = torch.tensor( solve_state_eq(u.numpy(),boundary_condition), dtype=torch.float32 )
+        if add_noise:
+            noise = 1e-2*coeff_range*torch.randn(size=(n_samples, N), dtype=torch.float32)
+            y += noise
+        data["u"] = u
+        data["x"] = x.view(N,1).repeat(n_samples,1,1) # add batch axis 0 and axis 2 for dim(x) (=1)
+        data["y"] = y.unsqueeze(-1) # add final singleton axis to match x.shape
+        return data
+    
     else:
-        # samples state uniformly and calculates the associated control
-        dbernstein_basis = torch.tensor( [dbernstein_nk_dx(n_coeffs-1,k) for k in range(n_coeffs)], dtype=torch.float32)
-        if not generateAdjoint:
-            # then generate state data: y' = y + u
-            y_coeffs = 2*coeff_range*torch.rand(size=(n_samples,n_coeffs)) - coeff_range
-            y_coeffs[:,-1] = boundary_condition # so that boundary condition y(0) = y0 is met
-            y = torch.einsum('ij,jk...->ik...', y_coeffs, bernstein_basis)
-            dydx = torch.einsum('ij,jk...->ik...', y_coeffs, dbernstein_basis)
-            u = dydx - y
-            data[:,0,...] = u
-            data[:,1,...] = y + noise
-            return data
-        
-        else:
-            # generate adjoint data: -p' = p + (y-y_d)
-            p_coeffs = 2*coeff_range*torch.rand(size=(n_samples,n_coeffs)) - coeff_range
-            p_coeffs[:,0] = boundary_condition # adjoint has terminal condition
-            dpdx = torch.einsum('ij,jk...->ik...', p_coeffs, dbernstein_basis)
-            y = - dpdx - p + y_d
-            data[:,0,...] = y
-            data[:,1,...] = p + noise
-            return data"""
+        # generates adjoint p by sampling y uniformly
+        y = generate_controls(x, basis, n_samples, coeff_range, n_coeffs)
+        p = torch.tensor( solve_adjoint_eq(y.numpy(), y_d=y_d.numpy(), pf=boundary_condition), dtype=torch.float32 )
+        if add_noise:
+            noise = 1e-2*coeff_range*torch.randn(size=(n_samples, N), dtype=torch.float32)
+            p += noise
+        data["y-y_d"] = y - y_d
+        data["x"] = x.view(N).repeat(n_samples,1,1)
+        data["p"] = p.unsqueeze(-1) # add final singleton axis to match x.shape
+        return data
+    
 
-def normalise_tensor(t, dim):
-    # normalises a tensor along a given dim by subtracting mean and dividing by (uncorrected) std.dev
-    return (t - t.mean(dim=dim, keepdim=True)) / (t.std(dim=dim, keepdim=True) + 1e-6)
+def augment_data(data, n_augmented_samples, n_combinations, max_coeff, adjoint=False):
+    # create linear combinations of solutions to get new solutions
+    # returns n_augmented_samples of these lin.combs.
+    # n_combinations (int) : number of solutions to combine
+    # max_coeff (int) : max absolute size of lin.comb. coeffs
+    # adjoint (bool) : must be True if augmenting adjoint data, False if state data
+    
+    if not adjoint:
+        u = data["u"]
+        y = data["y"]
+        n_samples = y.shape[0]
+    else:
+        y_y_d = data["y-y_d"]
+        p = data["p"]
+        n_samples = p.shape[0]
+    x = data["x"]
+    
+    assert n_samples > n_combinations, "number of samples must be greater than number of combinations"
+    
+    # index array for which samples to combine
+    idx = torch.stack([ torch.randperm(n_samples)[:n_combinations] for i in range(n_augmented_samples) ])
+    
+    # sample lin.comb. coefficients from
+    coeffs = 2*max_coeff*torch.rand(size=(n_augmented_samples,n_combinations)) - max_coeff
+    
+    # normalise sum of each coeff vector to 1 (to ensure lin. comb. respects boundary conditions)
+    coeffs = coeffs/(coeffs.sum(dim=1, keepdims=True) + 1e-6)
+    if not adjoint:
+        y_aug = torch.einsum('nc..., nc...->n...', coeffs, y[idx] )
+        u_aug = torch.einsum('nc..., nc...->n...', coeffs, u[idx] )
+        data["u"] = torch.cat((u, u_aug))
+        data["y"] = torch.cat((y, y_aug))
+    else:
+        p_aug = torch.einsum('nc..., nc...->n...', coeffs, p[idx] )
+        y_y_d_aug = torch.einsum('nc..., nc...->n...', coeffs, y_y_d[idx] )
+        data["y-y_d"] = torch.cat((y_y_d, y_y_d_aug))
+        data["p"] = torch.cat((p, p_aug))
+    
+    data["x"] = torch.cat((x, x[0].repeat(n_augmented_samples,1,1)))

@@ -1,8 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Created on Mon May 27 15:42:30 2024
-
-Trains Fourier neural operators to solve exponential decay equation
+Trains Fourier neural operators to solve adjoint eq. in OC of exp decay eq.
 """
 
 # for saving data
@@ -24,7 +22,7 @@ from CustomDataset import *
 from generate_data import generate_data, augment_data
 
 # seed pytorch RNG
-seed = 12345
+seed = 54321
 torch.manual_seed(seed)
 
 if torch.cuda.is_available():
@@ -35,7 +33,7 @@ else:
     device = torch.device("cpu")
 
 # create data directory to store models and results
-data_dir_name = 'state_experiments_FNO'
+data_dir_name = 'adjoint_experiments_FNO'
 problem_dir_name = "simple_scalar_problem"
 script_dir = os.path.dirname(os.path.abspath(__file__))
 data_dir = os.path.join(script_dir, problem_dir_name, data_dir_name)
@@ -43,7 +41,8 @@ if not os.path.exists(data_dir):
         os.makedirs(data_dir)
 
 N = 64 # number of points x_i in domain
-y0 = 1. # initial condition on state
+pf = 0. # terminal condition on adjoint
+y_d = 1.5*torch.ones(N) # desired state
 
 n_models = 5 # no. of models to train
 
@@ -59,8 +58,8 @@ basis = "Legendre"
 n_coeffs = 6
 
 def generate_data_func(n_samples, n_augmented_samples):
-    data = generate_data(N, basis, n_samples=n_samples, n_coeffs=n_coeffs, coeff_range=2., boundary_condition=y0)
-    augment_data(data, n_augmented_samples=n_augmented_samples, n_combinations=5, max_coeff=2.)
+    data = generate_data(N, basis, n_samples=n_samples, n_coeffs=n_coeffs, coeff_range=2., boundary_condition=pf, generate_adjoint=True, y_d=y_d)
+    augment_data(data, n_augmented_samples=n_augmented_samples, n_combinations=5, max_coeff=2., adjoint=True)
     return data
 
 # generate different training data for different models?
@@ -77,11 +76,11 @@ else:
 
 # generate test and validation data
 test_data = generate_data_func(n_test-200, 200)
-u_test = test_data["u"].unsqueeze(-1); y_test = test_data["y"]
+y_yd_test = test_data["y-y_d"].unsqueeze(-1); p_test = test_data["p"]
 
 val_data = generate_data_func(n_val-200, 200)
 
-dataset_val = (val_data["u"].unsqueeze(-1).to(device), val_data["y"].to(device))
+dataset_val = (val_data["y-y_d"].unsqueeze(-1).to(device), val_data["p"].to(device))
 
 
 #######################################
@@ -89,14 +88,14 @@ dataset_val = (val_data["u"].unsqueeze(-1).to(device), val_data["y"].to(device))
 #######################################
 
 model_name = "FNO"
-d_u = 1 # dimension of input u(x_i): u is an Nxd_u array
+d_u = 1 # dimension of input function
 architectures = torch.cartesian_prod(torch.arange(1,4), torch.tensor([1,4,8])) # pairs of (n_layers, d_v)
 #architectures = torch.tensor([[3,8]])
 
 def loss_fn(preds, targets, weight_BC=1.):
     # loss is weighted sum of MSE + extra boundary loss to ensure model learns BC
-    init_cond_loss = weight_BC * ((preds[:,0] - y0)**2).mean()
-    return torch.nn.MSELoss()(preds, targets) + weight_BC*init_cond_loss
+    terminal_cond_loss = weight_BC * ((preds[:,-1] - pf)**2).mean()
+    return torch.nn.MSELoss()(preds, targets) + weight_BC*terminal_cond_loss
 
 weight_penalties = [0.]
 
@@ -126,10 +125,10 @@ for weight_penalty in weight_penalties:
             for m in range(n_models):
                 print("Training model", str(m+1) + "/" + str(n_models))
                 data = train_data[m]
-                u_train = data["u"].unsqueeze(-1)
-                y_train = data["y"]
+                y_yd_train = data["y-y_d"].unsqueeze(-1)
+                p_train = data["p"]
                 model = FNO(n_layers, N, d_u, d_v)
-                dataset = BasicDataset(u_train, y_train)
+                dataset = BasicDataset(y_yd_train, p_train)
                 dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
                 model.to(device)
                 time_start = time.time()
@@ -149,11 +148,11 @@ for weight_penalty in weight_penalties:
                 
                 loss_histories.append(loss_history.to('cpu'))
                 
-                preds = model(u_test)
-                loss_test = loss_fn(preds, y_test).item()
+                preds = model(y_yd_test)
+                loss_test = loss_fn(preds, p_test).item()
                 
                 metrics["test_loss"].append(loss_test)
-                metrics["R2"].append( 1. - loss_test/(y_test**2).mean() )
+                metrics["R2"].append( 1. - loss_test/(p_test**2).mean() )
                 
                 #i = 0
                 #plt.plot(np.linspace(0.,1.,N), preds[i].detach().numpy().ravel())
