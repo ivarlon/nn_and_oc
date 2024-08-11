@@ -45,7 +45,7 @@ if not os.path.exists(data_dir):
 N = 64 # number of points x_i in domain
 y0 = 1. # initial condition on state
 
-n_models = 5 # no. of models to train
+n_models = 3 # no. of models to train
 
 ################################
 # Generate train and test data #
@@ -100,7 +100,7 @@ def loss_fn(preds, targets, weight_BC=1.):
 
 weight_penalties = [0.]
 
-iterations = 8000 # no. of training epochs
+iterations = 4000 # no. of training epochs
 learning_rates = [1e-2,1e-3] # learning rate
 
 for weight_penalty in weight_penalties:
