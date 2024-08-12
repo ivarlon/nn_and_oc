@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Trains Deep Operator Networks (DeepONets)
+Trains DeepONet to solve adjoint equation -p' = -p + y-y_d
 """
 """else:
     def ODE_interior(y,x,p):
@@ -37,7 +37,7 @@ else:
     device = torch.device("cpu")
 
 # create data directory to store models and results
-data_dir_name = 'state_experiments_DON'
+data_dir_name = 'adjoint_experiments_DON'
 problem_dir_name = "simple_scalar_problem"
 script_dir = os.path.dirname(os.path.abspath(__file__))
 data_dir = os.path.join(script_dir, problem_dir_name, data_dir_name)
@@ -45,9 +45,8 @@ if not os.path.exists(data_dir):
         os.makedirs(data_dir)
 
 N = 64 # number of points x_i
-y0 = 1. # initial condition on state
-#pf = 0. # terminal condition on adjoint
-#y_d = 1.5*torch.ones(N,1) # desired state for OC
+pf = 0. # terminal condition on adjoint
+y_d = 1.5*torch.ones(N) # desired state for OC
 
 n_models = 5
 
@@ -64,8 +63,8 @@ basis = "Legendre"
 n_coeffs = 6
 
 def generate_data_func(n_samples, n_augmented_samples):
-    data = generate_data(N, basis, n_samples=n_samples, n_coeffs=n_coeffs, coeff_range=2., boundary_condition=y0)
-    augment_data(data, n_augmented_samples=n_augmented_samples, n_combinations=5, max_coeff=2.)
+    data = generate_data(N, basis, n_samples=n_samples, n_coeffs=n_coeffs, coeff_range=2., boundary_condition=pf, generate_adjoint=True, y_d=y_d)
+    augment_data(data, n_augmented_samples=n_augmented_samples, n_combinations=5, max_coeff=2., adjoint=True)
     return data
 
 # generate different data for different models?
@@ -85,27 +84,29 @@ else:
 # generate test data
 test_data = generate_data_func(n_test-200, 200)
 test_data["x"].requires_grad = True
-u_test = test_data["u"]; x_test = test_data["x"]; y_test = test_data["y"]
+y_yd_test = test_data["y-y_d"]; x_test = test_data["x"]; p_test = test_data["p"]
 
 val_data = generate_data_func(n_val-200, 200)
 val_data["x"].requires_grad = True
-u_val = val_data["u"]; x_val = val_data["x"]; y_val = val_data["y"]
-dataset_val = (u_val.to(device), x_val.to(device), y_val.to(device))
+y_yd_val = val_data["y-y_d"]; x_val = val_data["x"]; p_val = val_data["p"]
+dataset_val = (y_yd_val.to(device), x_val.to(device), p_val.to(device))
 
 
 #########################
 # Defining physics loss #
 #########################
 
-def ODE(u,x,y):
-        dy_x = torch.autograd.grad(outputs=y, inputs=x, grad_outputs=torch.ones_like(y), create_graph=True, retain_graph=True)[0]
-        return dy_x + y - u.view_as(y)
+def ODE(y,x,p):
+    # y is y-y_d
+    dp_x = torch.autograd.grad(outputs=p, inputs=x, grad_outputs=torch.ones_like(p), create_graph=True, retain_graph=True)[0]
+    return -dp_x + p - y.view_as(p)
 
-def physics_loss(u, x, y, weight_boundary=1.):
-    # y = y(x;u) is output of DeepONet, tensor of shape (n_samples, n_domain_points, dim(Y))
+def physics_loss(y, x, p, weight_boundary=1.):
+    # y is really y-y_d
+    # p = p(x;y,yd) is output of DeepONet
     # x is input tensor and has shape (n_samples, n_domain_points, dim(X))
-    ODE_loss = (ODE(u, x, y)**2).mean()
-    boundary_loss = torch.nn.MSELoss()(y[:,0], y0*torch.ones_like(y[:,0]))
+    ODE_loss = (ODE(y, x, p)**2).mean()
+    boundary_loss = torch.nn.MSELoss()(p[:,-1], pf*torch.ones_like(p[:,-1]))
     return ODE_loss + weight_boundary*boundary_loss
 
 
@@ -167,10 +168,10 @@ for n_conv_layers in n_conv_layers_list:
             for m in range(n_models):
                 print("Training model", str(m+1) + "/" + str(n_models))
                 data = train_data[m]
-                u_train = data["u"]
-                y_train = data["y"]
+                y_yd_train = data["y-y_d"]
+                p_train = data["p"]
                 x_train = data["x"]
-                dataset = DeepONetDataset(u_train, x_train, y_train, device=device)
+                dataset = DeepONetDataset(y_yd_train, x_train, p_train, device=device)
                 model = DeepONet(input_size_branch,
                                  input_size_trunk,
                                  branch_architecture,
@@ -204,10 +205,10 @@ for n_conv_layers in n_conv_layers_list:
                 loss_histories["data"].append(loss_data_history.to('cpu'))
                 loss_histories["physics"].append(loss_physics_history.to('cpu'))
                 
-                preds = model(u_test, x_test)
-                test_losses = (loss_fn_physics(preds, y_test, u_test, x_test).item(), loss_fn_data(preds, y_test, u_test, x_test).item())
+                preds = model(y_yd_test, x_test)
+                test_losses = (loss_fn_physics(preds, p_test, y_yd_test, x_test).item(), loss_fn_data(preds, p_test, y_yd_test, x_test).item())
                 metrics["test_loss"].append(test_losses)
-                metrics["R2"].append( 1. - sum(test_losses)/(y_test**2).mean() )
+                metrics["R2"].append( 1. - sum(test_losses)/(p_test**2).mean() )
                 
             print()
             print("Test losses", metrics["test_loss"])
