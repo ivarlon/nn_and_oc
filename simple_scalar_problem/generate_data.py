@@ -17,7 +17,7 @@ def improved_forward_euler(fun, y0, n_points, x_span, u):
     x = np.linspace(x0, xf, n_points)
     
     # set up solution array
-    y = np.zeros(shape=(n_batches, n_points))
+    y = np.zeros_like(u)
     y[:,0] = y0
     
     # step length
@@ -44,21 +44,19 @@ def solve_state_eq(u, y0=1., batched=True):
         return y[0]
     else:
         return y
-    
-    
+
 def solve_adjoint_eq(y, y_d, pf=0., batched=True):
     # if batched=False, y, y_d have shape (N,...)
     # solve ODE -p' = -p + (y-y_d)
     # backwards in time: p(t-1) = p(t) - dt*p'
-    adjoint_eq = lambda x, p: -p
+    # formally equivalent with solving state eq y' = -y + u
     if not batched:
         y = y[None]
         y_d = y_d[None]
-    else:
-        y_d = y_d[None]
-    N = y.shape[1]
-    p = improved_forward_euler(adjoint_eq, [pf], n_points=N, x_span=(0.,1.), u=np.flip(y-y_d))
+    
+    p = solve_state_eq(np.flip(y-y_d, axis=1), y0=pf)
     p = np.ascontiguousarray( np.flip(p, axis=1) )
+    
     if not batched:
         return p[0]
     else:
