@@ -127,7 +127,7 @@ def generate_data(N,
             noise = 1e-2*coeff_range*torch.randn(size=(n_samples, N), dtype=torch.float32)
             p += noise
         data["y-y_d"] = y - y_d
-        data["x"] = x.view(N).repeat(n_samples,1,1)
+        data["x"] = x.view(N,1).repeat(n_samples,1,1)
         data["p"] = p.unsqueeze(-1) # add final singleton axis to match x.shape
         return data
     
