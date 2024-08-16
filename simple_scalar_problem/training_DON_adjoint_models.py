@@ -193,7 +193,7 @@ for n_conv_layers in n_conv_layers_list:
                 time_end = time.time()
                 training_time = time_end - time_start
                 
-                model.to("cput")
+                model.to("cpu")
                 preds = model(y_yd_test, x_test)
                 test_loss_data = torch.nn.MSELoss()(preds, p_test).item()
                 test_loss_physics = physics_loss(y_yd_test, x_test, preds).item()
