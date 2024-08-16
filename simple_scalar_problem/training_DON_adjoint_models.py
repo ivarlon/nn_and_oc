@@ -193,6 +193,7 @@ for n_conv_layers in n_conv_layers_list:
                 time_end = time.time()
                 training_time = time_end - time_start
                 
+                model.to("cput")
                 preds = model(y_yd_test, x_test)
                 test_loss_data = torch.nn.MSELoss()(preds, p_test).item()
                 test_loss_physics = physics_loss(y_yd_test, x_test, preds).item()
@@ -203,6 +204,7 @@ for n_conv_layers in n_conv_layers_list:
                     if r2 < 0.95:
                         print("R2 = {:.2f} < 0.95, retraining for {:g} epochs.".format(r2, iterations))
                         n_retrains += 1
+                        model.to(device)
                         time_start = time.time()
                         loss_history_new, loss_data_history_new, loss_physics_history_new = train_DON(model, 
                                                                                     dataset,
@@ -221,6 +223,7 @@ for n_conv_layers in n_conv_layers_list:
                         time_end = time.time()
                         training_time = training_time + time_end - time_start
                         
+                        model.to("cpu")
                         preds = model(y_yd_test, x_test)
                         test_loss_data = torch.nn.MSELoss()(preds, p_test).item()
                         test_loss_physics = physics_loss(y_yd_test, x_test, preds).item()
