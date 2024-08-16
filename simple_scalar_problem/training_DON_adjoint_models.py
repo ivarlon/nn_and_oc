@@ -194,11 +194,11 @@ for n_conv_layers in n_conv_layers_list:
                 training_time = time_end - time_start
                 
                 preds = model(y_yd_test, x_test)
-                test_loss_data = loss_fn_data(preds, p_test, y_yd_test, x_test).item()
-                test_loss_physics = loss_fn_physics(preds, p_test, y_yd_test, x_test).item()
+                test_loss_data = torch.nn.MSELoss()(preds, p_test).item()
+                test_loss_physics = physics_loss(y_yd_test, x_test, preds).item()
                 test_losses = (test_loss_data, test_loss_physics)
                 
-                r2 = 1. - test_loss_data/(p_test**2).mean()
+                r2 = 1. - torch.mean(((preds-p_test)**2).mean(axis=1)/p_test.var(axis=1))
                 if retrain_if_low_r2:
                     if r2 < 0.95:
                         print("R2 = {:.2f} < 0.95, retraining for {:g} epochs.".format(r2, iterations))
@@ -222,11 +222,11 @@ for n_conv_layers in n_conv_layers_list:
                         training_time = training_time + time_end - time_start
                         
                         preds = model(y_yd_test, x_test)
-                        test_loss_data = loss_fn_data(preds, p_test, y_yd_test, x_test).item()
-                        test_loss_physics = loss_fn_physics(preds, p_test, y_yd_test, x_test).item()
+                        test_loss_data = torch.nn.MSELoss()(preds, p_test).item()
+                        test_loss_physics = physics_loss(y_yd_test, x_test, preds).item()
                         test_losses = (test_loss_data, test_loss_physics)
                         
-                        r2 = 1. - test_loss_data/(p_test**2).mean()
+                        r2 = 1. - torch.mean(((preds-p_test)**2).mean(axis=1)/p_test.var(axis=1))
                         
                         if r2 <0.95:
                             # abandon current model and reinitialise

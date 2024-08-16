@@ -137,7 +137,7 @@ learning_rates = [1e-2, 1e-3] # learning rates
 Train the various models
 """
 
-retrain_if_low_r2 = True # retrain model one additional time if R2 on test set is below 95%. The model is discarded and a new one initialised if the retrain still yields R2<0.95.
+retrain_if_low_r2 = False # retrain model one additional time if R2 on test set is below 95%. The model is discarded and a new one initialised if the retrain still yields R2<0.95.
 
 for n_conv_layers in n_conv_layers_list:
     print("Using", n_conv_layers, "conv layers")    
@@ -201,7 +201,7 @@ for n_conv_layers in n_conv_layers_list:
                 test_loss_physics = loss_fn_physics(preds, y_test, u_test, x_test).item()
                 test_losses = (test_loss_data, test_loss_physics)
                 
-                r2 = 1. - test_loss_data/(y_test**2).mean()
+                r2 = 1. - torch.mean(((preds-y_test)**2).mean(axis=1)/y_test.var(axis=1))
                 if retrain_if_low_r2:
                     if r2 < 0.95:
                         print("R2 = {:.2f} < 0.95, retraining for {:g} epochs.".format(r2, iterations))
@@ -229,7 +229,7 @@ for n_conv_layers in n_conv_layers_list:
                         test_loss_physics = loss_fn_physics(preds, y_test, u_test, x_test).item()
                         test_losses = (test_loss_data, test_loss_physics)
                         
-                        r2 = 1. - test_loss_data/(y_test**2).mean()
+                        r2 = 1. - torch.mean(((preds-y_test)**2).mean(axis=1)/y_test.var(axis=1))
                         
                         if r2 <0.95:
                             # abandon current model and reinitialise
