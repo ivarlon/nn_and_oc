@@ -2,12 +2,6 @@
 """
 Trains DeepONet to solve adjoint equation -p' = -p + y-y_d
 """
-"""else:
-    def ODE_interior(y,x,p):
-        # y is y-y_d
-        dp_x = torch.autograd.grad(outputs=p, inputs=x, grad_outputs=torch.ones_like(p), create_graph=True, retain_graph=True)[0]
-        return -dp_x + p - y.view_as(p)
-"""
 
 # for saving data
 import sys
@@ -26,7 +20,7 @@ from CustomDataset import *
 from generate_data import generate_data, augment_data
 
 # seed pytorch RNG
-seed = 1234
+seed = 4321
 torch.manual_seed(seed)
 
 if torch.cuda.is_available():
@@ -117,9 +111,6 @@ def physics_loss(y, x, p, weight_boundary=1.):
 input_size_branch = N
 input_size_trunk = 1
 
-final_layer_size1 = 10
-final_layer_size2 = 40
-
 architectures = [ ( [50,10], [10, 10] ),  ( [100,10], [20, 10] ), ( [100, 20], [20, 20] ), ( [200, 20], [20, 20] ), ( [500, 500, 50], [50, 50] ) ]
 #architectures = [([100,10], [20,10])]
 n_conv_layers_list = [0,2]
@@ -143,6 +134,9 @@ learning_rates = [1e-2, 1e-3] # learning rates
 """
 Train the various models
 """
+
+retrain_if_low_r2 = False # retrain model one additional time if R2 on test set is below 95%. The model is discarded and a new one initialised if the retrain still yields R2<0.95.
+
 for n_conv_layers in n_conv_layers_list:
     print("Using", n_conv_layers, "conv layers")    
     for architecture in architectures:
@@ -164,10 +158,12 @@ for n_conv_layers in n_conv_layers_list:
             loss_histories = dict(total = [], 
                               data = [],
                               physics = [])
-            
-            for m in range(n_models):
-                print("Training model", str(m+1) + "/" + str(n_models))
-                data = train_data[m]
+            m = 0
+            n_retrains = 0
+            while m < n_models:
+                m += 1
+                print("Training model", str(m) + "/" + str(n_models))
+                data = train_data[m-1]
                 y_yd_train = data["y-y_d"]
                 p_train = data["p"]
                 x_train = data["x"]
@@ -195,8 +191,57 @@ for n_conv_layers in n_conv_layers_list:
                                                                             lr=lr,
                                                                             weight_penalty=weight_penalty)
                 time_end = time.time()
-                training_time = round(time_end-time_start,1)
-                metrics["training_times"].append(training_time)
+                training_time = time_end - time_start
+                
+                preds = model(y_yd_test, x_test)
+                test_loss_data = loss_fn_data(preds, p_test, y_yd_test, x_test).item()
+                test_loss_physics = loss_fn_physics(preds, p_test, y_yd_test, x_test).item()
+                test_losses = (test_loss_data, test_loss_physics)
+                
+                r2 = 1. - test_loss_data/(p_test**2).mean()
+                if retrain_if_low_r2:
+                    if r2 < 0.95:
+                        print("R2 = {:.2f} < 0.95, retraining for {:g} epochs.".format(r2, iterations))
+                        n_retrains += 1
+                        time_start = time.time()
+                        loss_history_new, loss_data_history_new, loss_physics_history_new = train_DON(model, 
+                                                                                    dataset,
+                                                                                    dataset_val,
+                                                                                    iterations, 
+                                                                                    loss_fn_data,
+                                                                                    loss_fn_physics,
+                                                                                    batch_size_fun=batch_size_fun,
+                                                                                    batch_size_loc=batch_size_loc,
+                                                                                    lr=lr,
+                                                                                    weight_penalty=weight_penalty)
+                        loss_history = torch.cat((loss_history, loss_history_new))
+                        loss_data_history = torch.cat((loss_data_history, loss_data_history_new))
+                        loss_physics_history = torch.cat((loss_physics_history, loss_physics_history_new))
+                        
+                        time_end = time.time()
+                        training_time = training_time + time_end - time_start
+                        
+                        preds = model(y_yd_test, x_test)
+                        test_loss_data = loss_fn_data(preds, p_test, y_yd_test, x_test).item()
+                        test_loss_physics = loss_fn_physics(preds, p_test, y_yd_test, x_test).item()
+                        test_losses = (test_loss_data, test_loss_physics)
+                        
+                        r2 = 1. - test_loss_data/(p_test**2).mean()
+                        
+                        if r2 <0.95:
+                            # abandon current model and reinitialise
+                            assert n_retrains <= 10, "Break training to avoid infinite retraining loop. Adjust training parameters and rerun the code."
+                            print("Model retraining failed. R2 = {:.2f} < 0.95, reinitialising model.".format(r2))
+                            print()
+                            m -= 1
+                            continue
+                
+                
+                metrics["test_loss"].append(test_losses)
+                metrics["R2"].append(r2)
+                print("R2 = {:.2f}".format(r2))
+                
+                metrics["training_times"].append(round(training_time,1))
                 
                 model.to('cpu')
                 models_list.append(model)
@@ -205,14 +250,9 @@ for n_conv_layers in n_conv_layers_list:
                 loss_histories["data"].append(loss_data_history.to('cpu'))
                 loss_histories["physics"].append(loss_physics_history.to('cpu'))
                 
-                preds = model(y_yd_test, x_test)
-                test_losses = (loss_fn_physics(preds, p_test, y_yd_test, x_test).item(), loss_fn_data(preds, p_test, y_yd_test, x_test).item())
-                metrics["test_loss"].append(test_losses)
-                metrics["R2"].append( 1. - sum(test_losses)/(p_test**2).mean() )
+                
                 
             print()
-            print("Test losses", metrics["test_loss"])
-            print("R2", metrics["R2"])
             
             # save training_loss
             filename_loss_history = "loss_history_" + str(n_conv_layers) + "_" + model_params + "_" + str(lr) + ".pkl"
