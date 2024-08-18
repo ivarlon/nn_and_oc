@@ -216,12 +216,12 @@ for n_conv_layers in n_conv_layers_list:
                                                                                     batch_size_loc=batch_size_loc,
                                                                                     lr=lr,
                                                                                     weight_penalty=weight_penalty)
+                        time_end = time.time()
+                        training_time = training_time + time_end - time_start
+                        
                         loss_history = torch.cat((loss_history, loss_history_new))
                         loss_data_history = torch.cat((loss_data_history, loss_data_history_new))
                         loss_physics_history = torch.cat((loss_physics_history, loss_physics_history_new))
-                        
-                        time_end = time.time()
-                        training_time = training_time + time_end - time_start
                         
                         model.to("cpu")
                         preds = model(y_yd_test, x_test)
@@ -246,7 +246,6 @@ for n_conv_layers in n_conv_layers_list:
                 
                 metrics["training_times"].append(round(training_time,1))
                 
-                model.to('cpu')
                 models_list.append(model)
                 
                 loss_histories["total"].append(loss_history.to('cpu'))

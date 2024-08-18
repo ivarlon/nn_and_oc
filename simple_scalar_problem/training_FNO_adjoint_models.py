@@ -102,6 +102,11 @@ weight_penalties = [0.]
 iterations = 5000 # no. of training epochs
 learning_rates = [1e-2,1e-3] # learning rate
 
+"""
+Training models
+"""
+retrain_if_low_r2 = False # retrain model one additional time if R2 on test set is below 95%. The model is discarded and a new one initialised if the retrain still yields R2<0.95.
+
 for weight_penalty in weight_penalties:
     print("Using weight penalty", weight_penalty)
     for architecture in architectures:
@@ -121,10 +126,12 @@ for weight_penalty in weight_penalties:
             
             # create list to store the training loss histories
             loss_histories = []
-        
-            for m in range(n_models):
-                print("Training model", str(m+1) + "/" + str(n_models))
-                data = train_data[m]
+            m = 0
+            n_retrains = 0
+            while m < n_models:
+                m += 1
+                print("Training model", str(m) + "/" + str(n_models))
+                data = train_data[m-1]
                 y_yd_train = data["y-y_d"].unsqueeze(-1)
                 p_train = data["p"]
                 model = FNO(n_layers, N, d_u, d_v)
@@ -140,19 +147,50 @@ for weight_penalty in weight_penalties:
                                     lr=lr,
                                     weight_penalty=weight_penalty)
                 time_end = time.time()
-                training_time = round(time_end-time_start,1)
-                metrics["training_times"].append(training_time)
+                training_time = time_end - time_start
                 
                 model.to('cpu')
+                preds = model(y_yd_test)
+                test_loss = loss_fn(preds, p_test).item()
+                r2 = 1. - torch.mean(((preds-p_test)**2).mean(axis=1)/p_test.var(axis=1))
+                if retrain_if_low_r2:
+                    if r2 < 0.95:
+                        print("R2 = {:.2f} < 0.95, retraining for {:g} epochs.".format(r2, iterations))
+                        n_retrains += 1
+                        model.to(device)
+                        time_start = time.time()
+                        loss_history_new = train_FNO(model,
+                                            dataloader, 
+                                            dataset_val,
+                                            iterations, 
+                                            loss_fn,
+                                            lr=lr,
+                                            weight_penalty=weight_penalty)
+                        
+                        time_end = time.time()
+                        training_time = training_time + time_end - time_start
+                        
+                        loss_history = torch.cat((loss_history, loss_history_new))
+                        
+                        model.to('cpu')
+                        preds = model(y_yd_test)
+                        test_loss = loss_fn(preds, p_test).item()
+                        r2 = 1. - torch.mean(((preds-p_test)**2).mean(axis=1)/p_test.var(axis=1))
+                        if r2 <0.95:
+                            # abandon current model and reinitialise
+                            assert n_retrains <= 10, "Break training to avoid infinite retraining loop. Adjust training parameters and rerun the code."
+                            print("Model retraining failed. R2 = {:.2f} < 0.95, reinitialising model.".format(r2))
+                            print()
+                            m -= 1
+                            continue
+                    
                 models_list.append(model)
                 
                 loss_histories.append(loss_history.to('cpu'))
                 
-                preds = model(y_yd_test)
-                loss_test = loss_fn(preds, p_test).item()
-                
-                metrics["test_loss"].append(loss_test)
-                metrics["R2"].append( 1. - loss_test/(p_test**2).mean() )
+                metrics["training_times"].append(round(training_time, 1))
+                metrics["test_loss"].append(test_loss)
+                metrics["R2"].append(r2)
                 
                 #i = 0
                 #plt.plot(np.linspace(0.,1.,N), preds[i].detach().numpy().ravel())
