@@ -23,7 +23,7 @@ def solve_state_eq(u, y_IC, y_BCs, D, t_span, x_span, batched=True):
     t0, tf = t_span
     x0, xf = x_span
     if not batched:
-        u = u[None,:]
+        u = u[None]
     
     y = crank_nicolson(y_IC, y_BCs, D, u, t0=t0, tf=tf, x0=x0,xf=xf)
     if not batched:
@@ -37,7 +37,7 @@ def solve_adjoint_eq(y, y_d, p_TC, p_BCs, D, t_span, x_span, batched=True):
     # solve ODE -p_t = -Dp_xx + (y-y_d)
     # backwards in time: p(t-1) = p(t) - dt*p' = p(t) + dt (-p')
     # use the fact that this is equivalent with solving the state equation
-    p = solve_state_eq(y-y_d, p_TC, p_BCs, D, t_span, x_span, batched=batched)
+    p = solve_state_eq(np.flip(y-y_d, axis=batched), p_TC, p_BCs, D, t_span, x_span, batched=batched)
     p = np.ascontiguousarray(np.flip(p, axis=batched)) # flip time axis and store as new array
     return p
 
@@ -88,7 +88,7 @@ def generate_data(N_t,
                   y_d=None, 
                   seed=None,
                   add_noise=False,
-                  refinement=100):
+                  refinement=1):
     """
     refinement (int) : determines how fine the domain discretisation is during data generation. Returned data are coarsened to correspond to N_x, N_t
     """
@@ -98,8 +98,8 @@ def generate_data(N_t,
     # domain
     t0, tf = t_span
     x0, xf = x_span
-    t = torch.linspace(t0,tf,refinement*N_t).view(refinement*N_t)
-    x = torch.linspace(x0,xf,refinement*N_x).view(refinement*N_x)
+    t = torch.linspace(t0,tf,refinement*(N_t-1)+1).view(refinement*(N_t-1)+1)
+    x = torch.linspace(x0,xf,refinement*(N_x-1)+1).view(refinement*(N_x-1)+1)
     
     # seed RNG
     if seed:
@@ -122,7 +122,7 @@ def generate_data(N_t,
         # return u and y as (n_samples, N_t*N_x) shaped arrays
         data["u"] = u
         data["tx"] = torch.cartesian_prod(t, x)[None].repeat(n_samples,1,1)
-        data["y"] = y
+        data["y"] = y[:,::refinement]
         return data
     
     else:

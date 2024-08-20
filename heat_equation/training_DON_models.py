@@ -12,7 +12,6 @@ import time # to measure training time
 # import numerical libraries
 import numpy as np
 import torch
-torch.set_default_dtype(torch.float32) # all tensors are float32
 
 # import custom libraries and functions
 from DeepONet import DeepONet
@@ -40,26 +39,26 @@ if not os.path.exists(data_dir):
         os.makedirs(data_dir)
 
 
-diffusion_coeff = 0.25 # coefficient multiplying curvature term y_xx
+diffusion_coeff = 1e-1 # coefficient multiplying curvature term y_xx
 
 N_t = 64 # number of time points t_i
-N_x = 32 # number of spatial points x_j
+N_x = 64 # number of spatial points x_j
 
 # time span
-T = 0.2
+T = 1.
 t0 = 0.; tf = t0 + T
 
 # domain length
-L = 0.1
+L = 2.
 x0 = 0.; xf = x0 + L
 
 # boundary conditions
-y_IC = 2.*torch.sin(torch.linspace(0., 2*np.pi, N_x))**2 # initial condition on state is double peak with amplitude 2
+y_IC = 0.5*torch.sin(torch.linspace(0., 2*np.pi, N_x))**2 # initial condition on state is double peak with amplitude 2
 y_BCs = (torch.zeros(N_t), torch.zeros(N_t)) # Dirichlet boundary conditions on state
 
-y_d = 1.5*torch.sin(torch.linspace(0., np.pi, N_t))**10 # desired state for OC is single peak
+y_d = 0.5*torch.sin(torch.linspace(0., np.pi, N_t))**10 # desired state for OC is single peak
 
-n_models = 10
+n_models = 5
 
 ################################
 # Generate train and test data #
@@ -68,7 +67,7 @@ n_models = 10
 n_train = 5000 # no. of training samples
 n_test = 500 # no. of test samples
 n_val = 500 # no. of training samples
-batch_size_fun = 100 # minibatch size during SGD
+batch_size_fun = 200 # minibatch size during SGD
 batch_size_loc = N_x*N_t # no. of minibatch domain points. Get worse performance when not using entire domain :/
 n_t_coeffs = 4
 n_x_coeffs = 5
@@ -85,7 +84,7 @@ generate_data_func = lambda n_samples: generate_data(N_t, N_x, t_span=(t0,tf), x
                   generate_adjoint=False)
 
 # generate different data for different models?
-different_data = False
+different_data = True
 if different_data:
     train_data = []
     for m in range(n_models):
@@ -151,10 +150,14 @@ def physics_loss(u, x, y, y_IC, y_BCs, weight_IC=5., weight_BC=1.):
 
 input_size_branch = (N_t, N_x)
 input_size_trunk = 2
-n_conv_layers = 0
 
+architectures = [([100,40], [100,40]),
+                 ([100,100,40], [100,40]),
+                 ([100,40], [100,100,40])
+                 ([200,100], [200,100]),
+                 ([200,200,100], [200,100]  ) ]
+n_conv_layers_list = [0,3]
 
-architectures = [([100,40], [100,40])] #+ [ ([200,100,50], [100,50]) ] + [([300,300,100,50], [200,100,50]) ] + [( [50,50,50 ], [50,50 ] )]  
 activation_branch = torch.nn.ReLU()
 activation_trunk = torch.nn.Sigmoid()
 
@@ -174,15 +177,19 @@ loss_fn_data = lambda preds, targets, u, x: weight_data * torch.nn.MSELoss()(pre
 
 
 weight_penalty = 0. # L2 penalty for NN weights
-learning_rates = [1e-2]
+learning_rates = [1e-2,1e-3]
 
-iterations = 8000 # no. of training epochs
+iterations = 7000 # no. of training epochs
 
 
 """
 Train the various models
 """
-for n_conv_layers in [0]:
+retrain_if_low_r2 = False # retrain model one additional time if R2 on test set is below desired score. The model is discarded and a new one initialised if the retrain still yields R2<0.95.
+max_n_retrains = 20 # max. no. of retrains (to avoid potential infinite retrain loop)
+desired_r2 = 0.95
+
+for n_conv_layers in n_conv_layers_list:
     print("Using", n_conv_layers, "conv layers")
     for architecture in architectures:
         branch_architecture, trunk_architecture = architecture
@@ -204,9 +211,12 @@ for n_conv_layers in [0]:
                               data = [],
                               physics = [])
             
-            for m in range(n_models):
-                print("Training model", str(m+1) + "/" + str(n_models))
-                data = train_data[m]
+            m = 0
+            n_retrains = 0
+            while m < n_models:
+                m += 1
+                print("Training model", str(m) + "/" + str(n_models))
+                data = train_data[m-1]
                 u_train = data["u"]
                 y_train = data["y"]
                 tx_train = data["tx"]
@@ -235,24 +245,71 @@ for n_conv_layers in [0]:
                                                                             weight_penalty=weight_penalty)
                 
                 time_end = time.time()
-                training_time = round(time_end-time_start,1)
+                training_time = time_end - time_start
+                
+                model.to("cpu")
+                preds = model(u_test, tx_test)
+                
+                r2 = 1. - torch.mean(((preds.flatten(start_dim=1)-y_test.flatten(start_dim=1))**2).mean(axis=1)/y_test.flatten(start_dim=1).var(axis=1))
+                if retrain_if_low_r2:
+                    if r2 < desired_r2:
+                        print("R2 = {:.2f} < {:.2f}, retraining for {:g} epochs.".format(r2, desired_r2, iterations))
+                        n_retrains += 1
+                        model.to(device)
+                        time_start = time.time()
+                        loss_history_new, loss_data_history_new, loss_physics_history_new = train_DON(model, 
+                                                                                    dataset,
+                                                                                    dataset_val,
+                                                                                    iterations, 
+                                                                                    loss_fn_data,
+                                                                                    loss_fn_physics_device,
+                                                                                    batch_size_fun=batch_size_fun,
+                                                                                    batch_size_loc=batch_size_loc,
+                                                                                    lr=lr,
+                                                                                    weight_penalty=weight_penalty)
+                        time_end = time.time()
+                        training_time = training_time + time_end - time_start
+                        
+                        loss_history = torch.cat((loss_history, loss_history_new))
+                        loss_data_history = torch.cat((loss_data_history, loss_data_history_new))
+                        loss_physics_history = torch.cat((loss_physics_history, loss_physics_history_new))
+                        
+                        model.to("cpu")
+                        preds = model(u_test, tx_test)
+                        
+                        r2 = 1. - torch.mean(((preds.flatten(start_dim=1)-y_test.flatten(start_dim=1))**2).mean(axis=1)/y_test.flatten(start_dim=1).var(axis=1))
+                        if r2 < desired_r2:
+                            # abandon current model and reinitialise
+                            if n_retrains >= max_n_retrains:
+                                print("Break training to avoid infinite retraining loop. Adjust training parameters and rerun the code.")
+                                print("Trained {:g} models.".format(m))
+                                print()
+                                break
+                            print("Model retraining failed. R2 = {:.2f} < {:.2f}, reinitialising model.".format(r2, desired_r2))
+                            print()
+                            m -= 1
+                            continue
+                        else:
+                            n_retrains -= 1 # let a successful retraining give more "slack" for later retrainings
+                
+                # calculate test losses
+                test_loss_data = torch.nn.MSELoss()(preds.view_as(y_test), y_test).item()
+                test_loss_physics = physics_loss(u_test, tx_test, preds, y_IC.to('cpu'),(y_BCs[0].to('cpu'), y_BCs[1].to('cpu')))
+                test_losses = (test_loss_data, test_loss_physics)
+                
+                metrics["test_loss"].append(test_losses)
+                metrics["R2"].append( 1. - sum(test_losses)/(y_test**2).mean() )
                 metrics["training_times"].append(training_time)
                 
-                model.to('cpu')
                 models_list.append(model)
                 
                 loss_histories["total"].append(loss_history.to('cpu'))
                 loss_histories["data"].append(loss_data_history.to('cpu'))
                 loss_histories["physics"].append(loss_physics_history.to('cpu'))
                 
-                preds = model(u_test, tx_test)
-                test_losses = (loss_fn_physics_CPU(preds, y_test, u_test, tx_test).item(), loss_fn_data(preds, y_test, u_test, tx_test).item())
-                metrics["test_loss"].append(test_losses)
-                metrics["R2"].append( 1. - sum(test_losses)/(y_test**2).mean() )
+                
                 
                 print()
-            print("Test losses", metrics["test_loss"])
-            print("R2", metrics["R2"])
 
             # save training_loss
             filename_loss_history = "loss_history_" + model_params + "_" + str(lr) + ".pkl"
