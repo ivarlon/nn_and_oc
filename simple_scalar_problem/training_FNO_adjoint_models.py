@@ -89,7 +89,7 @@ dataset_val = (val_data["y-y_d"].unsqueeze(-1).to(device), val_data["p"].to(devi
 
 model_name = "FNO"
 d_u = 1 # dimension of input function
-architectures = torch.cartesian_prod(torch.arange(1,4), torch.tensor([1,4,8])) # pairs of (n_layers, d_v)
+architectures = torch.cartesian_prod(torch.arange(1,5), torch.tensor([2,4,8,16])) # pairs of (n_layers, d_v)
 #architectures = torch.tensor([[3,8]])
 
 def loss_fn(preds, targets, weight_BC=1.):
@@ -105,7 +105,9 @@ learning_rates = [1e-2,1e-3] # learning rate
 """
 Training models
 """
-retrain_if_low_r2 = False # retrain model one additional time if R2 on test set is below 95%. The model is discarded and a new one initialised if the retrain still yields R2<0.95.
+retrain_if_low_r2 = False # retrain model one additional time if R2 on test set is below desired score. The model is discarded and a new one initialised if the retrain still yields R2<0.95.
+max_n_retrains = 20 # max. no. of retrains (to avoid potential infinite retrain loop)
+desired_r2 = 0.95
 
 for weight_penalty in weight_penalties:
     print("Using weight penalty", weight_penalty)
@@ -154,8 +156,8 @@ for weight_penalty in weight_penalties:
                 test_loss = loss_fn(preds, p_test).item()
                 r2 = 1. - torch.mean(((preds-p_test)**2).mean(axis=1)/p_test.var(axis=1))
                 if retrain_if_low_r2:
-                    if r2 < 0.95:
-                        print("R2 = {:.2f} < 0.95, retraining for {:g} epochs.".format(r2, iterations))
+                    if r2 < desired_r2:
+                        print("R2 = {:.2f} < {:.2f}, retraining for {:g} epochs.".format(r2, desired_r2, iterations))
                         n_retrains += 1
                         model.to(device)
                         time_start = time.time()
@@ -176,13 +178,19 @@ for weight_penalty in weight_penalties:
                         preds = model(y_yd_test)
                         test_loss = loss_fn(preds, p_test).item()
                         r2 = 1. - torch.mean(((preds-p_test)**2).mean(axis=1)/p_test.var(axis=1))
-                        if r2 <0.95:
+                        if r2 < desired_r2:
                             # abandon current model and reinitialise
-                            assert n_retrains <= 10, "Break training to avoid infinite retraining loop. Adjust training parameters and rerun the code."
+                            if n_retrains >= max_n_retrains:
+                                print("Break training to avoid infinite retraining loop. Adjust training parameters and rerun the code.")
+                                print("Trained {:g} models.".format(m))
+                                print()
+                                break
                             print("Model retraining failed. R2 = {:.2f} < 0.95, reinitialising model.".format(r2))
                             print()
                             m -= 1
                             continue
+                        else:
+                            n_retrains -= 1 # let a successful retraining give more "slack" for later retrainings
                     
                 models_list.append(model)
                 

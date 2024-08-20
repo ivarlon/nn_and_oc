@@ -137,7 +137,9 @@ learning_rates = [1e-2, 1e-3] # learning rates
 Train the various models
 """
 
-retrain_if_low_r2 = False # retrain model one additional time if R2 on test set is below 95%. The model is discarded and a new one initialised if the retrain still yields R2<0.95.
+retrain_if_low_r2 = False # retrain model one additional time if R2 on test set is below desired score. The model is discarded and a new one initialised if the retrain still yields R2<0.95.
+max_n_retrains = 20 # max. no. of retrains (to avoid potential infinite retrain loop)
+desired_r2 = 0.95
 
 for n_conv_layers in n_conv_layers_list:
     print("Using", n_conv_layers, "conv layers")    
@@ -195,17 +197,17 @@ for n_conv_layers in n_conv_layers_list:
                                                                             weight_penalty=weight_penalty)
                 time_end = time.time()
                 training_time = time_end - time_start
-                model.to("cpu")
                 
+                model.to("cpu")
                 preds = model(u_test, x_test)
-                test_loss_data = loss_fn_data(preds, y_test, u_test, x_test).item()
-                test_loss_physics = loss_fn_physics(preds, y_test, u_test, x_test).item()
+                test_loss_data = torch.nn.MSELoss()(preds, y_test).item()
+                test_loss_physics = physics_loss(u_test, x_test, preds).item()
                 test_losses = (test_loss_data, test_loss_physics)
                 
                 r2 = 1. - torch.mean(((preds-y_test)**2).mean(axis=1)/y_test.var(axis=1))
                 if retrain_if_low_r2:
-                    if r2 < 0.95:
-                        print("R2 = {:.2f} < 0.95, retraining for {:g} epochs.".format(r2, iterations))
+                    if r2 < desired_r2:
+                        print("R2 = {:.2f} < {:.2f}, retraining for {:g} epochs.".format(r2, desired_r2, iterations))
                         n_retrains += 1
                         model.to(device)
                         time_start = time.time()
@@ -234,13 +236,20 @@ for n_conv_layers in n_conv_layers_list:
                         
                         r2 = 1. - torch.mean(((preds-y_test)**2).mean(axis=1)/y_test.var(axis=1))
                         
-                        if r2 <0.95:
+                        if r2 < desired_r2:
                             # abandon current model and reinitialise
-                            assert n_retrains <= 10, "Break training to avoid infinite retraining loop. Adjust training parameters and rerun the code."
-                            print("Model retraining failed. R2 = {:.2f} < 0.95, reinitialising model.".format(r2))
+                            if n_retrains >= max_n_retrains:
+                                print("Break training to avoid infinite retraining loop. Adjust training parameters and rerun the code.")
+                                print("Trained {:g} models.".format(m))
+                                print()
+                                break
+                            print("Model retraining failed. R2 = {:.2f} < {:.2f}, reinitialising model.".format(r2, desired_r2))
                             print()
                             m -= 1
                             continue
+                        else:
+                            n_retrains -= 1 # let a successful retraining give more "slack" for later retrainings
+                            
                 
                 metrics["test_loss"].append(test_losses)
                 metrics["R2"].append(r2)
