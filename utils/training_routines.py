@@ -23,7 +23,8 @@ def train_FNO(model,
           iterations,
           loss_fn,
           lr=1e-3,
-          weight_penalty=0.):
+          weight_penalty=0.,
+          print_every=None):
     # model is a FNO pytorch model
     # dataloader (DataLoader) : iterable of training dataset
     # dataset_val (tuple) : of the form (u_val, y_val)
@@ -31,6 +32,7 @@ def train_FNO(model,
     # loss_fn : loss function, returns singleton pytorch tensor
     # lr (float) : learning rate
     # weight_penalty (float) : L2 weight penalty
+    # print_every (None or int) : prints the training loss for every print_every epoch, or no print if print_every==None
     
     def training_loop(model, optimizer, dataloader):
         loss_epoch = 0.
@@ -70,8 +72,9 @@ def train_FNO(model,
             best_val_loss = val_loss
             best_epoch = epoch
             best_model_params = model.state_dict()
-        if epoch%20==0:
-            print("{}/{}".format(epoch,iterations), "Loss:", loss_epoch)
+        if print_every:
+            if epoch%print_every==0:
+                print("{}/{}".format(epoch,iterations), "Loss:", loss_epoch)
     
     # save the best model parameters
     print("Lowest validation error at epoch", best_epoch, ":", best_val_loss)
@@ -88,7 +91,8 @@ def train_DON(model,
           batch_size_fun=None,
           batch_size_loc=None,
           lr=1e-3,
-          weight_penalty=0.):
+          weight_penalty=0.,
+          print_every=None):
     # model is a DeepONet pytorch model
     # dataset (DeepONetDataset) : training dataset
     # dataset_val (tuple) : of the form (u_val, x_val, y_val)
@@ -97,6 +101,7 @@ def train_DON(model,
     # batch_size_fun, batch_size_loc (int) : size of minibatches for u and x resp. Default is no minibatching
     # lr (float) : learning rate
     # weight_penalty (float) : L2 weight penalty
+    # print_every (None or int) : prints the training loss for every print_every epoch, or no print if print_every==None
     
     best_val_loss = validation_step(model, (loss_fn_data, loss_fn_physics), dataset_val)
     best_epoch = 0
@@ -179,8 +184,9 @@ def train_DON(model,
             best_epoch = epoch
             best_model_params = model.state_dict()
         model.train()
-        if epoch%10==0:
-            print("{}/{}".format(epoch,iterations), "Loss:", loss_epoch)
+        if print_every:
+            if epoch%print_every==0:
+                print("{}/{}".format(epoch,iterations), "Loss:", loss_epoch)
     
     # save the best model parameters
     print("Lowest validation error at epoch", best_epoch, ":", best_val_loss)
