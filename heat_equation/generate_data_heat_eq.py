@@ -98,8 +98,8 @@ def generate_data(N_t,
     # domain
     t0, tf = t_span
     x0, xf = x_span
-    t = torch.linspace(t0,tf,refinement*(N_t-1)+1).view(refinement*(N_t-1)+1)
-    x = torch.linspace(x0,xf,refinement*(N_x-1)+1).view(refinement*(N_x-1)+1)
+    t = torch.linspace(t0,tf,refinement*(N_t-1)+1)
+    x = torch.linspace(x0,xf,refinement*(N_x-1)+1)
     
     # seed RNG
     if seed:
@@ -121,7 +121,7 @@ def generate_data(N_t,
             y += noise
         # return u and y as (n_samples, N_t*N_x) shaped arrays
         data["u"] = u
-        data["tx"] = torch.cartesian_prod(t, x)[None].repeat(n_samples,1,1)
+        data["tx"] = torch.cartesian_prod(t, x)[None].expand(n_samples,N_t*N_x,2)
         data["y"] = y[:,::refinement]
         return data
     
@@ -136,7 +136,7 @@ def generate_data(N_t,
         if add_noise:
             p += noise
         data["y-y_d"] = y-y_d
-        data["tx"] = torch.cartesian_prod(t, x)[None].repeat(n_samples,1,1)
+        data["tx"] = torch.cartesian_prod(t, x)[None].expand(n_samples,N_t*N_x,2)
         data["p"] = p
         return data
     
@@ -178,4 +178,4 @@ def augment_data(data, n_augmented_samples, n_combinations, max_coeff, adjoint=F
         y_y_d_aug = torch.einsum('nc..., nc...->n...', coeffs, y_y_d[idx] )
         data["y-y_d"] = torch.cat((y_y_d, y_y_d_aug))
         data["p"] = torch.cat((p, p_aug))
-    data["tx"] = torch.cat((tx, tx[0].repeat(n_augmented_samples,1,1)))
+    data["tx"] = torch.cat((tx, tx[0].expand(n_augmented_samples,tx.shape[1],tx.shape[2])))

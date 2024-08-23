@@ -19,13 +19,15 @@ from utils.training_routines import train_DON
 from CustomDataset import *
 from generate_data_heat_eq import generate_data, augment_data
 
+cuda = 0 #1,2,3
+
 # seed pytorch RNG
 seed = 1234
 torch.manual_seed(seed)
 
 if torch.cuda.is_available():
     print("Using CUDA\n")
-    device = torch.device("cuda:0")
+    device = torch.device("cuda:{}".format(cuda))
 else:
     print("Using CPU\n")
     device = torch.device("cpu")
@@ -42,7 +44,7 @@ if not os.path.exists(data_dir):
 diffusion_coeff = 1e-1 # coefficient multiplying curvature term y_xx
 
 N_t = 64 # number of time points t_i
-N_x = 64 # number of spatial points x_j
+N_x = 32 # number of spatial points x_j
 
 # time span
 T = 1.
@@ -153,9 +155,9 @@ input_size_trunk = 2
 
 architectures = [([100,40], [100,40]),
                  ([100,100,40], [100,40]),
-                 ([100,40], [100,100,40])
+                 ([100,40], [100,100,40]),
                  ([200,100], [200,100]),
-                 ([200,200,100], [200,100]  ) ]
+                 ([200,200,100], [200,100]  ) ][cuda:cuda+1]
 n_conv_layers_list = [0,3]
 
 activation_branch = torch.nn.ReLU()
@@ -177,9 +179,9 @@ loss_fn_data = lambda preds, targets, u, x: weight_data * torch.nn.MSELoss()(pre
 
 
 weight_penalty = 0. # L2 penalty for NN weights
-learning_rates = [1e-2,1e-3]
+learning_rates = [5e-3]
 
-iterations = 7000 # no. of training epochs
+iterations = 5000 # no. of training epochs
 
 
 """
@@ -312,15 +314,15 @@ for n_conv_layers in n_conv_layers_list:
                 print()
 
             # save training_loss
-            filename_loss_history = "loss_history_" + model_params + "_" + str(lr) + ".pkl"
+            filename_loss_history = "loss_history_" + str(n_conv_layers) + "_" + model_params + "_" + str(lr) + ".pkl"
             with open(os.path.join(data_dir, filename_loss_history), "wb") as outfile:
                 pickle.dump(loss_histories, outfile)
             # save metrics
-            filename_metrics = "metrics_" + model_params + "_" + str(lr) + ".pkl"
+            filename_metrics = "metrics_" + str(n_conv_layers) + "_" + model_params + "_" + str(lr) + ".pkl"
             with open(os.path.join(data_dir, filename_metrics), "wb") as outfile:
                 pickle.dump(metrics, outfile)
             # save models
-            filename_models_list = "models_list_" + model_params + "_" + str(lr) + ".pkl"
+            filename_models_list = "models_list_" + str(n_conv_layers) + "_" + model_params + "_" + str(lr) + ".pkl"
             with open(os.path.join(data_dir, filename_models_list), "wb") as outfile:
                 pickle.dump(models_list, outfile)
             
