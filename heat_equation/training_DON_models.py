@@ -110,7 +110,7 @@ u_test = test_data["u"]; tx_test = test_data["tx"]; y_test = test_data["y"]
 val_data = generate_data_func(n_val-200)
 augment_data(val_data, n_augmented_samples=200, n_combinations=5, max_coeff=2)
 val_data["tx"].requires_grad = True
-dataset_val = (val_data["u"].to(device), val_data["tx"].to(device), val_data["y"].to(device))
+dataset_val = (val_data["u"], val_data["tx"], val_data["y"])
 
 
 ################
