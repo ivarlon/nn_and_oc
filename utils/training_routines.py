@@ -22,6 +22,7 @@ def train_FNO(model,
           dataset_val,
           iterations,
           loss_fn,
+          device='cpu',
           lr=1e-3,
           weight_penalty=0.,
           print_every=None):
@@ -39,8 +40,8 @@ def train_FNO(model,
         
         for batch in dataloader:
             optimizer.zero_grad()
-            u = batch[0]
-            y = batch[1]
+            u = batch[0].to(device)
+            y = batch[1].to(device)
             
             # Compute forward pass, calculate loss and gradients and update parameters
             preds = model(u)
@@ -88,6 +89,7 @@ def train_DON(model,
           iterations,
           loss_fn_data,
           loss_fn_physics,
+          device='cpu',
           batch_size_fun=None,
           batch_size_loc=None,
           lr=1e-3,
@@ -136,10 +138,10 @@ def train_DON(model,
                 j_start = j*batch_size_loc; j_end = (j+1)*batch_size_loc
                 fun_idx_batch = fun_indices[i_start:i_end]
                 loc_idx_batch = loc_indices[fun_idx_batch, j_start:j_end]
-                u_batch = dataset.u[fun_idx_batch]
-                x_batch = dataset.x[fun_idx_batch.unsqueeze(1), loc_idx_batch]
+                u_batch = dataset.u[fun_idx_batch].to(device)
+                x_batch = dataset.x[fun_idx_batch.unsqueeze(1), loc_idx_batch].to(device)
                 
-                y_batch = dataset.y.flatten(start_dim=1)[fun_idx_batch.unsqueeze(1), loc_idx_batch].view(batch_size_fun, *dataset.y.shape[1:])
+                y_batch = dataset.y.flatten(start_dim=1)[fun_idx_batch.unsqueeze(1), loc_idx_batch].view(batch_size_fun, *dataset.y.shape[1:]).to(device)
                 
                 # Compute forward pass and loss; update weights
                 preds = model(u_batch, x_batch)

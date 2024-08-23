@@ -222,7 +222,7 @@ for n_conv_layers in n_conv_layers_list:
                 u_train = data["u"]
                 y_train = data["y"]
                 tx_train = data["tx"]
-                dataset = DeepONetDataset(u_train, tx_train, y_train, device=device)
+                dataset = DeepONetDataset(u_train, tx_train, y_train)
                 model = DeepONet(input_size_branch,
                                  input_size_trunk,
                                  branch_architecture,
@@ -244,7 +244,8 @@ for n_conv_layers in n_conv_layers_list:
                                                                             batch_size_fun=batch_size_fun,
                                                                             batch_size_loc=batch_size_loc,
                                                                             lr=lr,
-                                                                            weight_penalty=weight_penalty)
+                                                                            weight_penalty=weight_penalty,
+                                                                            device=device)
                 
                 time_end = time.time()
                 training_time = time_end - time_start
@@ -268,7 +269,8 @@ for n_conv_layers in n_conv_layers_list:
                                                                                     batch_size_fun=batch_size_fun,
                                                                                     batch_size_loc=batch_size_loc,
                                                                                     lr=lr,
-                                                                                    weight_penalty=weight_penalty)
+                                                                                    weight_penalty=weight_penalty,
+                                                                                    device=device)
                         time_end = time.time()
                         training_time = training_time + time_end - time_start
                         
