@@ -7,16 +7,14 @@ import torch
 torch.set_default_dtype(torch.float32) # all tensors are float32
 from itertools import zip_longest
 
-def validation_step(model, loss_fns, val_data, device):
+def validation_step(model, loss_fns, val_data):
     # val_data = (u,x,y) for DON or (u,y) for FNO
-    model.to('cpu') # compute validation loss on CPU
     targets = val_data[-1]
     inputs = val_data[:-1]
     preds = model(*inputs)
     val_loss = 0.
     for loss_fn in loss_fns:
         val_loss += loss_fn(preds, targets, *inputs)
-    model.to(device) # resume training on assigned device
     return val_loss.item()
 
 def train_FNO(model,
@@ -55,7 +53,7 @@ def train_FNO(model,
         loss_epoch = loss_epoch/len(dataloader)
         return loss_epoch
     
-    best_val_loss = validation_step(model, (lambda preds, targets, inputs: loss_fn(preds, targets),), dataset_val, device=device)
+    best_val_loss = validation_step(model, (lambda preds, targets, inputs: loss_fn(preds, targets),), dataset_val)
     best_epoch = 0
     best_model_params = model.state_dict()
     
@@ -70,7 +68,7 @@ def train_FNO(model,
         loss_history.append(loss_epoch)
         
         # compute validation loss
-        val_loss = validation_step(model, (lambda preds, targets, inputs: loss_fn(preds, targets),), dataset_val, device=device)
+        val_loss = validation_step(model, (lambda preds, targets, inputs: loss_fn(preds, targets),), dataset_val)
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             best_epoch = epoch
@@ -107,7 +105,7 @@ def train_DON(model,
     # weight_penalty (float) : L2 weight penalty
     # print_every (None or int) : prints the training loss for every print_every epoch, or no print if print_every==None
     
-    best_val_loss = validation_step(model, (loss_fn_data, loss_fn_physics), dataset_val, device=device)
+    best_val_loss = validation_step(model, (loss_fn_data, loss_fn_physics), dataset_val)
     best_epoch = 0
     best_model_params = model.state_dict()
     
@@ -182,7 +180,7 @@ def train_DON(model,
         loss_physics_history.append(loss_physics_epoch)
         model.eval()
         # compute validation loss
-        val_loss = validation_step(model, (loss_fn_data, loss_fn_physics), dataset_val, device=device)
+        val_loss = validation_step(model, (loss_fn_data, loss_fn_physics), dataset_val)
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             best_epoch = epoch

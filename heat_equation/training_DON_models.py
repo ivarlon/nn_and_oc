@@ -68,7 +68,7 @@ n_models = 5
 
 n_train = 5000 # no. of training samples
 n_test = 500 # no. of test samples
-n_val = 500 # no. of training samples
+n_val = 400 # no. of training samples
 batch_size_fun = 200 # minibatch size during SGD
 batch_size_loc = N_x*N_t # no. of minibatch domain points. Get worse performance when not using entire domain :/
 n_t_coeffs = 4
@@ -110,7 +110,7 @@ u_test = test_data["u"]; tx_test = test_data["tx"]; y_test = test_data["y"]
 val_data = generate_data_func(n_val-200)
 augment_data(val_data, n_augmented_samples=200, n_combinations=5, max_coeff=2)
 val_data["tx"].requires_grad = True
-dataset_val = (val_data["u"], val_data["tx"], val_data["y"])
+dataset_val = (val_data["u"].to(device), val_data["tx"].to(device), val_data["y"].to(device))
 
 
 ################
