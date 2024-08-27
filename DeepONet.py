@@ -48,10 +48,10 @@ class DeepONet(torch.nn.Module):
             # consider having input_size_branch either int for u(x) or tuple for u(t,x)
             # then possibly do flatten for fully connected net (n_conv_layers=0)
             if input_size_trunk == 1:
-                pool = torch.nn.MaxPool1d(kernel_size=2)
+                pool = lambda i: torch.nn.MaxPool1d(kernel_size=2)
                 conv_layer = lambda i: torch.nn.Conv1d(2**i, 2**(i+1), kernel_size=3, padding=1)
             elif input_size_trunk == 2:
-                pool = torch.nn.MaxPool2d(kernel_size=2)
+                pool = lambda i: torch.nn.MaxPool2d(kernel_size=2)
                 conv_layer = lambda i: torch.nn.Conv2d(2**i, 2**(i+1), kernel_size=3, padding=1)
             else:
                 assert False, "only 2d trunk inputs supported atm"
@@ -60,7 +60,7 @@ class DeepONet(torch.nn.Module):
                 for i in range(n_conv_layers):
                     conv_layers.append(conv_layer(i))
                     conv_layers.append(activation_branch)
-                    conv_layers.append(pool)
+                    conv_layers.append(pool(i))
                 conv_net = torch.nn.Sequential(*conv_layers)
                 return conv_net
         # intialise a branch net for each output dimension
@@ -102,25 +102,15 @@ class DeepONet(torch.nn.Module):
         # final bias
         self.bias = torch.nn.Parameter(torch.zeros(1,1,num_out_channels))
         
-        # set forward method so that trunk input tensor x has same first dimension as branch input u
-        #self.trunk_input_shares_first_dimension_with_branch_input(True)
+        # initialise weights
+        self._initialise_weights(activation_branch, activation_trunk)
         
         if use_convolution:
             self.forward = self.forward_conv
         else:
             self.forward = self.forward_fc
         
-        
-    def trunk_input_shares_first_dimension_with_branch_input(self, share):
-        """
-        Alternates the forward method depending on whether
-        trunk input tensor x has a first dimension corresponding to batch dimension
-        of branch input (useful if domain x differs for different branch input u)
-        """
-        if share == True:
-            self.forward = self.forward_share
-        else:
-            self.forward = self.forward_dont_share
+    
             
     def forward_conv(self, u, x):
         # u is tensor representing n-valued function evaluated at n_u points, with shape (no. of function samples, n_u*n)
@@ -150,3 +140,30 @@ class DeepONet(torch.nn.Module):
         # B: function batch; y: output channel; i: latent dimension; b: domain batch
         out = torch.einsum('Byi..., bi... -> Bby...', u, x) + self.bias
         return out
+    
+    def _initialise_weights(self, activation_branch, activation_trunk):
+        # initialises weights in each layer using a normal dist. Uses Kaiming He (spread~sqrt(1/n)) for ReLU and Xavier Glorot (spread~sqrt(2/n)) for sigmoid etc
+        
+        # branch weights
+        if type(activation_branch) == type(torch.nn.ReLU()):
+            # use Kaiming for ReLU
+            for m in self.branch.modules():
+                if isinstance(m, (torch.nn.Linear, torch.nn.Conv1d, torch.nn.Conv2d)):
+                    torch.nn.init.kaiming_normal_(m.weight, nonlinearity='relu')
+        elif type(activation_branch) in ( type(torch.nn.Sigmoid()), type(torch.nn.Tanh()) ) :
+            # use Glorot for sigmoid/tanh
+            for m in self.branch.modules():
+                if isinstance(m, (torch.nn.Linear, torch.nn.Conv1d, torch.nn.Conv2d)):
+                    torch.nn.init.xavier_normal_(m.weight)
+        
+        # trunk weights
+        if type(activation_trunk) == type(torch.nn.ReLU()):
+            # use Kaiming for ReLU
+            for m in self.trunk.modules():
+                if isinstance(m, (torch.nn.Linear, torch.nn.Conv1d, torch.nn.Conv2d)):
+                    torch.nn.init.kaiming_normal_(m.weight, nonlinearity='relu')
+        elif type(activation_trunk) in ( type(torch.nn.Sigmoid()), type(torch.nn.Tanh()) ) :
+            # use Glorot for sigmoid/tanh
+            for m in self.trunk.modules():
+                if isinstance(m, (torch.nn.Linear, torch.nn.Conv1d, torch.nn.Conv2d)):
+                    torch.nn.init.xavier_normal_(m.weight)
