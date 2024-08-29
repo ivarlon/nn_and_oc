@@ -88,7 +88,8 @@ def generate_data(N_t,
                   y_d=None, 
                   seed=None,
                   add_noise=False,
-                  refinement=1):
+                  refinement_t=1,
+                  refinement_x=1):
     """
     refinement (int) : determines how fine the domain discretisation is during data generation. Returned data are coarsened to correspond to N_x, N_t
     """
@@ -98,8 +99,8 @@ def generate_data(N_t,
     # domain
     t0, tf = t_span
     x0, xf = x_span
-    t = torch.linspace(t0,tf,refinement*(N_t-1)+1)
-    x = torch.linspace(x0,xf,refinement*(N_x-1)+1)
+    t = torch.linspace(t0,tf,refinement_t*(N_t-1)+1)
+    x = torch.linspace(x0,xf,refinement_x*(N_x-1)+1)
     
     # seed RNG
     if seed:
@@ -120,9 +121,9 @@ def generate_data(N_t,
         if add_noise:
             y += noise
         # return u and y as (n_samples, N_t*N_x) shaped arrays
-        data["u"] = u
-        data["tx"] = torch.cartesian_prod(t, x)[None].expand(n_samples,N_t*N_x,2)
-        data["y"] = y[:,::refinement]
+        data["u"] = u[:,::refinement_t,::refinement_x]
+        data["tx"] = torch.cartesian_prod(t[::refinement_t], x[::refinement_x])[None].expand(n_samples,N_t*N_x,2)
+        data["y"] = y[:,::refinement_t,::refinement_x]
         return data
     
     else:
@@ -135,9 +136,9 @@ def generate_data(N_t,
         p = torch.tensor( solve_adjoint_eq(y.numpy(), y_d, IC, BCs, diffusion_coeff, t_span, x_span), dtype=torch.float32 )
         if add_noise:
             p += noise
-        data["y-y_d"] = y-y_d
-        data["tx"] = torch.cartesian_prod(t, x)[None].expand(n_samples,N_t*N_x,2)
-        data["p"] = p
+        data["y-y_d"] = (y-y_d)[:,::refinement_t,::refinement_x]
+        data["tx"] = torch.cartesian_prod(t[::refinement_t], x[::refinement_x])[None].expand(n_samples,N_t*N_x,2)
+        data["p"] = p[:,::refinement_t,::refinement_x]
         return data
     
 

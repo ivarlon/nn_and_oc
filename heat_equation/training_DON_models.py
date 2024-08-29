@@ -43,8 +43,10 @@ if not os.path.exists(data_dir):
 
 diffusion_coeff = 1e-1 # coefficient multiplying curvature term y_xx
 
-N_t = 64 # number of time points t_i
-N_x = 32 # number of spatial points x_j
+N_t = 32 # number of time points t_i
+N_x = 16 # number of spatial points x_j
+refinement_t = 2 # generate data based on a factor of 'refinement' more points
+refinement_x = 2 # generate data based on a factor of 'refinement' more points
 
 # time span
 T = 1.
@@ -55,8 +57,8 @@ L = 2.
 x0 = 0.; xf = x0 + L
 
 # boundary conditions
-y_IC = 0.5*torch.sin(torch.linspace(0., 2*np.pi, N_x))**2 # initial condition on state is double peak with amplitude 2
-y_BCs = (torch.zeros(N_t), torch.zeros(N_t)) # Dirichlet boundary conditions on state
+y_IC = 0.5*torch.sin(torch.linspace(0., 2*np.pi, refinement_x*(N_x-1)+1))**2 # initial condition on state is double peak with amplitude 2
+y_BCs = (torch.zeros(refinement_t*(N_t-1) + 1), torch.zeros(refinement_t*(N_t-1)+1)) # Dirichlet boundary conditions on state
 
 y_d = 0.5*torch.sin(torch.linspace(0., np.pi, N_t))**10 # desired state for OC is single peak
 
@@ -69,7 +71,7 @@ n_models = 5
 n_train = 5000 # no. of training samples
 n_test = 500 # no. of test samples
 n_val = 400 # no. of training samples
-batch_size_fun = 200 # minibatch size during SGD
+batch_size_fun = 100 # minibatch size during SGD
 batch_size_loc = N_x*N_t # no. of minibatch domain points. Get worse performance when not using entire domain :/
 n_t_coeffs = 4
 n_x_coeffs = 5
@@ -83,7 +85,9 @@ generate_data_func = lambda n_samples: generate_data(N_t, N_x, t_span=(t0,tf), x
                   n_samples=n_samples,
                   u_max=u_max,
                   diffusion_coeff=diffusion_coeff,
-                  generate_adjoint=False)
+                  generate_adjoint=False,
+                  refinement_t=refinement_t,
+                  refinement_x=refinement_x)
 
 # generate different data for different models?
 different_data = True
@@ -101,6 +105,7 @@ else:
     data["tx"].requires_grad = True
     train_data = n_models*[data]
 
+
 # generate test and validation data
 test_data = generate_data_func(n_test-200)
 augment_data(test_data, n_augmented_samples=200, n_combinations=5, max_coeff=2)
@@ -112,6 +117,8 @@ augment_data(val_data, n_augmented_samples=200, n_combinations=5, max_coeff=2)
 val_data["tx"].requires_grad = True
 dataset_val = (val_data["u"].to(device), val_data["tx"].to(device), val_data["y"].to(device))
 
+y_IC = y_IC[::refinement_x]
+y_BCs = (y_BCs[0][::refinement_t], y_BCs[1][::refinement_t]) # Dirichlet boundary conditions on state
 
 ################
 # physics loss #
@@ -302,7 +309,7 @@ for n_conv_layers in n_conv_layers_list:
                 test_losses = (test_loss_data, test_loss_physics)
                 
                 metrics["test_loss"].append(test_losses)
-                metrics["R2"].append( 1. - sum(test_losses)/(y_test**2).mean() )
+                metrics["R2"].append( r2 )
                 metrics["training_times"].append(training_time)
                 
                 models_list.append(model)
