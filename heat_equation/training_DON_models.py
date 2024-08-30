@@ -68,7 +68,7 @@ n_models = 5
 # Generate train and test data #
 ################################
 
-n_train = 500 # no. of training samples
+n_train = 5000 # no. of training samples
 n_test = 500 # no. of test samples
 n_val = 400 # no. of training samples
 batch_size_fun = 50 # minibatch size during SGD
@@ -94,8 +94,8 @@ different_data = True
 if different_data:
     train_data = []
     for m in range(n_models):
-        data = generate_data_func(n_train-200)
-        augment_data(data, n_augmented_samples=200, n_combinations=5, max_coeff=2)
+        data = generate_data_func(n_train-2000)
+        augment_data(data, n_augmented_samples=2000, n_combinations=5, max_coeff=2)
         data["tx"].requires_grad = True
         train_data.append(data)
 else:
