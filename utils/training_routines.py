@@ -60,15 +60,18 @@ def train_FNO(model,
     # set-up for training
     model.train()
     optimizer = torch.optim.Adam(params=model.parameters(), lr=lr, weight_decay=weight_penalty)
-    loss_history = []
+    loss_history_train = []
+    loss_history_val = []
     
     # training loop
     for epoch in range(iterations):
         loss_epoch = training_loop(model, optimizer, dataloader)
-        loss_history.append(loss_epoch)
+        loss_history_train.append(loss_epoch)
         
         # compute validation loss
         val_loss = validation_step(model, (lambda preds, targets, inputs: loss_fn(preds, targets),), dataset_val)
+        loss_history_val.append(val_loss)
+        
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             best_epoch = epoch
@@ -81,7 +84,7 @@ def train_FNO(model,
     print("Lowest validation error at epoch", best_epoch, ":", best_val_loss)
     model.load_state_dict(best_model_params)
     
-    return torch.tensor(loss_history)
+    return torch.tensor(loss_history_train), torch.tensor(loss_history_val)
 
 def train_DON(model,
           dataset, 
@@ -89,6 +92,7 @@ def train_DON(model,
           iterations,
           loss_fn_data,
           loss_fn_physics,
+          optimizer="adam",
           device='cpu',
           batch_size_fun=None,
           batch_size_loc=None,
@@ -167,20 +171,25 @@ def train_DON(model,
     
     # set-up for training
     model.train()
-    optimizer = torch.optim.Adam(params=model.parameters(), lr=lr, weight_decay=weight_penalty)
-    loss_history = []
+    if optimizer=="RMSprop":
+        optim = torch.optim.RMSprop(params=model.parameters(), lr=lr, weight_decay=weight_penalty, momentum=0.9)
+    else:
+        optim = torch.optim.Adam(params=model.parameters(), lr=lr, weight_decay=weight_penalty)
+    loss_history_train = []
     loss_data_history = []
     loss_physics_history = []
+    loss_history_val = []
     
     # training loop
     for epoch in range(iterations):
-        loss_epoch, loss_data_epoch, loss_physics_epoch = training_loop(model, optimizer)
-        loss_history.append(loss_epoch)
+        loss_epoch, loss_data_epoch, loss_physics_epoch = training_loop(model, optim)
+        loss_history_train.append(loss_epoch)
         loss_data_history.append(loss_data_epoch)
         loss_physics_history.append(loss_physics_epoch)
         model.eval()
         # compute validation loss
         val_loss = validation_step(model, (loss_fn_data, loss_fn_physics), dataset_val)
+        loss_history_val.append(val_loss)
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             best_epoch = epoch
@@ -194,4 +203,4 @@ def train_DON(model,
     print("Lowest validation error at epoch", best_epoch, ":", best_val_loss)
     model.load_state_dict(best_model_params)
     
-    return torch.tensor(loss_history), torch.tensor(loss_data_history), torch.tensor(loss_physics_history)
+    return torch.tensor(loss_history_train), torch.tensor(loss_data_history), torch.tensor(loss_physics_history), torch.tensor(loss_history_val)
