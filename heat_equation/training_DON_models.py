@@ -43,10 +43,10 @@ if not os.path.exists(data_dir):
 
 diffusion_coeff = 1e-1 # coefficient multiplying curvature term y_xx
 
-N_t = 32 # number of time points t_i
-N_x = 16 # number of spatial points x_j
-refinement_t = 2 # generate data based on a factor of 'refinement' more points
-refinement_x = 2 # generate data based on a factor of 'refinement' more points
+N_t = 64 # number of time points t_i
+N_x = 32 # number of spatial points x_j
+refinement_t = 1 # generate data based on a factor of 'refinement' more points
+refinement_x = 1 # generate data based on a factor of 'refinement' more points
 
 # time span
 T = 1.
@@ -68,10 +68,10 @@ n_models = 5
 # Generate train and test data #
 ################################
 
-n_train = 5000 # no. of training samples
+n_train = 500 # no. of training samples
 n_test = 500 # no. of test samples
 n_val = 400 # no. of training samples
-batch_size_fun = 100 # minibatch size during SGD
+batch_size_fun = 50 # minibatch size during SGD
 batch_size_loc = N_x*N_t # no. of minibatch domain points. Get worse performance when not using entire domain :/
 n_t_coeffs = 4
 n_x_coeffs = 5
@@ -94,8 +94,8 @@ different_data = True
 if different_data:
     train_data = []
     for m in range(n_models):
-        data = generate_data_func(n_train-2000)
-        augment_data(data, n_augmented_samples=2000, n_combinations=5, max_coeff=2)
+        data = generate_data_func(n_train-200)
+        augment_data(data, n_augmented_samples=200, n_combinations=5, max_coeff=2)
         data["tx"].requires_grad = True
         train_data.append(data)
 else:
@@ -104,7 +104,6 @@ else:
     augment_data(data, n_augmented_samples=2000, n_combinations=5, max_coeff=2)
     data["tx"].requires_grad = True
     train_data = n_models*[data]
-
 
 # generate test and validation data
 test_data = generate_data_func(n_test-200)
@@ -152,7 +151,7 @@ def physics_loss(u, x, y, y_IC, y_BCs, weight_IC=5., weight_BC=1.):
     
     return interior_loss + weight_IC*IC_loss + weight_BC*BC_loss
 
-
+assert False
 #######################################
 # Set up and train the various models #
 #######################################
@@ -167,7 +166,7 @@ architectures = [([100,40], [100,40]),
                  ([200,200,100], [200,100]  ) ][cuda:cuda+1]
 n_conv_layers_list = [0,3]
 
-activation_branch = torch.nn.ReLU()
+activation_branch = torch.nn.Sigmoid()
 activation_trunk = torch.nn.Sigmoid()
 
 # weights for physics and data loss: loss = w_ph*loss_ph + w_d*loss_d
@@ -186,7 +185,7 @@ loss_fn_data = lambda preds, targets, u, x: weight_data * torch.nn.MSELoss()(pre
 
 
 weight_penalty = 0. # L2 penalty for NN weights
-learning_rates = [5e-3]
+learning_rates = [1e-3]
 
 iterations = 5000 # no. of training epochs
 
@@ -242,17 +241,18 @@ for n_conv_layers in n_conv_layers_list:
                 model.to(device)
                 time_start = time.time()
                 
-                loss_history, loss_data_history, loss_physics_history = train_DON(model, 
-                                                                            dataset,
-                                                                            dataset_val,
-                                                                            iterations, 
-                                                                            loss_fn_data,
-                                                                            loss_fn_physics_device,
-                                                                            batch_size_fun=batch_size_fun,
-                                                                            batch_size_loc=batch_size_loc,
-                                                                            lr=lr,
-                                                                            weight_penalty=weight_penalty,
-                                                                            device=device)
+                loss_hist, loss_data_hist, loss_physics_hist, loss_hist_val = train_DON(model, 
+                                                                                    dataset,
+                                                                                    dataset_val,
+                                                                                    iterations, 
+                                                                                    loss_fn_data,
+                                                                                    loss_fn_physics_device,
+                                                                                    batch_size_fun=batch_size_fun,
+                                                                                    batch_size_loc=batch_size_loc,
+                                                                                    lr=lr,
+                                                                                    weight_penalty=weight_penalty,
+                                                                                    device=device,
+                                                                                    print_every=20)
                 
                 time_end = time.time()
                 training_time = time_end - time_start
@@ -267,23 +267,25 @@ for n_conv_layers in n_conv_layers_list:
                         n_retrains += 1
                         model.to(device)
                         time_start = time.time()
-                        loss_history_new, loss_data_history_new, loss_physics_history_new = train_DON(model, 
-                                                                                    dataset,
-                                                                                    dataset_val,
-                                                                                    iterations, 
-                                                                                    loss_fn_data,
-                                                                                    loss_fn_physics_device,
-                                                                                    batch_size_fun=batch_size_fun,
-                                                                                    batch_size_loc=batch_size_loc,
-                                                                                    lr=lr,
-                                                                                    weight_penalty=weight_penalty,
-                                                                                    device=device)
+                        loss_hist_new, loss_data_hist_new, loss_physics_hist_new, loss_hist_val_new = train_DON(model, 
+                                                                                                            dataset,
+                                                                                                            dataset_val,
+                                                                                                            iterations, 
+                                                                                                            loss_fn_data,
+                                                                                                            loss_fn_physics_device,
+                                                                                                            batch_size_fun=batch_size_fun,
+                                                                                                            batch_size_loc=batch_size_loc,
+                                                                                                            lr=lr,
+                                                                                                            weight_penalty=weight_penalty,
+                                                                                                            device=device,
+                                                                                                            print_every=20)
                         time_end = time.time()
                         training_time = training_time + time_end - time_start
                         
-                        loss_history = torch.cat((loss_history, loss_history_new))
-                        loss_data_history = torch.cat((loss_data_history, loss_data_history_new))
-                        loss_physics_history = torch.cat((loss_physics_history, loss_physics_history_new))
+                        loss_hist = torch.cat((loss_hist, loss_hist_new))
+                        loss_data_hist = torch.cat((loss_data_hist, loss_data_hist_new))
+                        loss_physics_hist = torch.cat((loss_physics_hist, loss_physics_hist_new))
+                        loss_hist_val = torch.cat((loss_hist_val, loss_hist_val_new))
                         
                         model.to("cpu")
                         preds = model(u_test, tx_test)
@@ -314,9 +316,10 @@ for n_conv_layers in n_conv_layers_list:
                 
                 models_list.append(model)
                 
-                loss_histories["total"].append(loss_history.to('cpu'))
-                loss_histories["data"].append(loss_data_history.to('cpu'))
-                loss_histories["physics"].append(loss_physics_history.to('cpu'))
+                loss_histories["total"].append(loss_hist.to('cpu'))
+                loss_histories["data"].append(loss_data_hist.to('cpu'))
+                loss_histories["physics"].append(loss_physics_hist.to('cpu'))
+                loss_histories["validation"].append(loss_hist_val.to('cpu'))
                 
                 
                 
