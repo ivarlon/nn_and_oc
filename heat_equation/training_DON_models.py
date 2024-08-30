@@ -151,7 +151,7 @@ def physics_loss(u, x, y, y_IC, y_BCs, weight_IC=5., weight_BC=1.):
     
     return interior_loss + weight_IC*IC_loss + weight_BC*BC_loss
 
-assert False
+
 #######################################
 # Set up and train the various models #
 #######################################
