@@ -217,7 +217,8 @@ for n_conv_layers in n_conv_layers_list:
             # create dict to store the training loss histories
             loss_histories = dict(total = [], 
                               data = [],
-                              physics = [])
+                              physics = [],
+                              validation = [])
             
             m = 0
             n_retrains = 0
