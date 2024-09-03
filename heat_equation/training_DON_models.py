@@ -19,13 +19,7 @@ from utils.training_routines import train_DON
 from CustomDataset import *
 from generate_data_heat_eq import generate_data, augment_data
 
-try:
-    cuda = int(sys.argv[-1])
-except:
-    try:
-        cuda = int(sys.argv[-2])
-    except:
-        cuda = 0 # 1,2,3
+cuda = 1 # 1,2,3
 
 # seed pytorch RNG
 seed = 1234
