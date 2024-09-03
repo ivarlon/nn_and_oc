@@ -26,7 +26,10 @@ torch.manual_seed(seed)
 try:
     cuda = int(sys.argv[-1])
 except:
-    cuda = 0 # 1,2,3
+    try:
+        cuda = int(sys.argv[-2])
+    except:
+        cuda = 0 # 1,2,3
 
 if torch.cuda.is_available():
     print("Using CUDA", cuda)

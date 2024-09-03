@@ -22,7 +22,10 @@ from generate_data_heat_eq import generate_data, augment_data
 try:
     cuda = int(sys.argv[-1])
 except:
-    cuda = 0 # 1,2,3
+    try:
+        cuda = int(sys.argv[-2])
+    except:
+        cuda = 0 # 1,2,3
 
 # seed pytorch RNG
 seed = 1234
