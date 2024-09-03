@@ -1,6 +1,4 @@
 """
-Created on Mon May 27 15:42:30 2024
-
 Trains Fourier neural operators to solve heat equation
 """
 
@@ -12,7 +10,6 @@ import time # to measure training time
 
 # import numberical libraries
 import numpy as np
-import matplotlib.pyplot as plt
 import torch
 from torch.utils.data import DataLoader
 
@@ -26,10 +23,11 @@ from generate_data_heat_eq import generate_data, augment_data
 seed = 123
 torch.manual_seed(seed)
 
+cuda = 0 # 1,2,3
 
 if torch.cuda.is_available():
     print("Using CUDA")
-    device = torch.device("cuda:1")
+    device = torch.device("cuda:{}".format(cuda))
 else:
     print("Using CPU")
     device = torch.device("cpu")
@@ -43,26 +41,24 @@ if not os.path.exists(data_dir):
         os.makedirs(data_dir)
 
 
-diffusion_coeff = 0.25 # coefficient multiplying curvature term y_xx
+diffusion_coeff = 1e-1 # coefficient multiplying curvature term y_xx
 
 N_t = 64 # number of time points t_i
 N_x = 32 # number of spatial points x_j
 
 # time span
-T = 0.2
+T = 1.
 t0 = 0.; tf = t0 + T
 
 # domain length
-L = 0.1
+L = 2.
 x0 = 0.; xf = x0 + L
 
 # boundary conditions
 y_IC = 2.*torch.sin(torch.linspace(0., 2*np.pi, N_x))**2 # initial condition on state is double peak with amplitude 2
 y_BCs = (torch.zeros(N_t), torch.zeros(N_t)) # Dirichlet boundary conditions on state
 
-y_d = 1.5*torch.sin(torch.linspace(0., np.pi, N_t))**10 # desired state for OC is single peak
-
-n_models = 10 # number of models to train
+n_models = 3 # number of models to train
 
 
 ################################
@@ -71,8 +67,8 @@ n_models = 10 # number of models to train
 
 n_train = 5000 # no. of training samples
 n_test = 500 # no. of test samples
-n_val = 500
-batch_size = 100 # minibatch size during SGD
+n_val = 400
+batch_size = 50 # minibatch size during SGD
 
 n_t_coeffs = 4
 n_x_coeffs = 5
@@ -114,7 +110,7 @@ u_test = flatten_tensors(test_data["u"]); y_test = flatten_tensors(test_data["y"
 
 val_data = generate_data_func(n_val-200)
 augment_data(val_data, n_augmented_samples=200, n_combinations=5, max_coeff=2)
-dataset_val = (flatten_tensors(val_data["u"]).to(device), flatten_tensors(test_data["y"]).to(device))
+dataset_val = (flatten_tensors(val_data["u"]).to(device), flatten_tensors(val_data["y"]).to(device))
 
 
 #######################################
@@ -122,17 +118,21 @@ dataset_val = (flatten_tensors(val_data["u"]).to(device), flatten_tensors(test_d
 #######################################
 
 d_u = 1 # dimension of input u(x_i): u is an Nxd_u array
-architectures = torch.cartesian_prod(torch.arange(1,4), torch.tensor([1,4,8])) # pairs of (n_layers, d_v)
-architectures = torch.tensor([[3,8]])
+architectures = torch.cartesian_prod(torch.arange(2,5), torch.tensor([2,4,8,16])) # pairs of (n_layers, d_v)
 
 loss_fn = torch.nn.MSELoss()
 
 weight_penalties = [0]#, 1e-2, 1e-3]
-models_list = []
-loss_histories = []
+learning_rates = [1e-3] # learning rate
 
-iterations = 8000 # no. of training epochs
-learning_rates = [1e-2] # learning rate
+iterations = 3000 # no. of training epochs
+
+"""
+Train the models
+"""
+retrain_if_low_r2 = False # retrain model one additional time if R2 on test set is below desired score. The model is discarded and a new one initialised if the retrain still yields R2<0.95.
+max_n_retrains = 20 # max. no. of retrains (to avoid potential infinite retrain loop)
+desired_r2 = 0.99
 
 for weight_penalty in weight_penalties:
     print("Using weight penalty", weight_penalty)
@@ -149,53 +149,103 @@ for weight_penalty in weight_penalties:
                            R2 = [],
                            training_times=[])
             
-            loss_histories = [] # list to store loss histories
+            loss_histories = dict(train = [],
+                                  validation = []) # dict to store loss histories
             
-            for m in range(n_models):
-                print("Training model", str(m+1) + "/" + str(n_models))
-                data = train_data[m]
+            m = 0
+            n_retrains = 0
+            while m < n_models:
+                m += 1
+                print("Training model", str(m) + "/" + str(n_models))
+                data = train_data[m-1]
                 u_train = flatten_tensors(data["u"])
                 y_train = flatten_tensors(data["y"])
-                model = FNO(n_layers, N_t*N_x, d_u, d_v)
                 dataset = BasicDataset(u_train, y_train, device=device)
                 dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+                model = FNO(n_layers, N_t*N_x, d_u, d_v)
                 model.to(device)
                 time_start = time.time()
-                loss_history = train_FNO(model,
-                                    dataloader, 
-                                    dataset_val,
-                                    iterations, 
-                                    loss_fn,
-                                    lr=lr,
-                                    weight_penalty=weight_penalty)
+                loss_hist, loss_hist_val = train_FNO(model,
+                                                    dataloader, 
+                                                    dataset_val,
+                                                    iterations, 
+                                                    loss_fn,
+                                                    lr=lr,
+                                                    weight_penalty=weight_penalty,
+                                                    device=device,
+                                                    print_every=20)
                 time_end = time.time()
-                training_time = round(time_end-time_start,1)
-                metrics["training_times"].append(training_time)
+                training_time = time_end - time_start
                 
                 model.to('cpu')
+                preds = model(u_test)
+                
+                r2 = 1. - torch.mean(((preds.flatten(start_dim=1)-y_test.flatten(start_dim=1))**2).mean(axis=1)/y_test.flatten(start_dim=1).var(axis=1))
+                if retrain_if_low_r2:
+                    if r2 < desired_r2:
+                        print("R2 = {:.2f} < {:.2f}, retraining for {:g} epochs.".format(r2, desired_r2, iterations))
+                        n_retrains += 1
+                        model.to(device)
+                        time_start = time.time()
+                        loss_hist_new, loss_hist_val_new = train_FNO(model,
+                                                            dataloader, 
+                                                            dataset_val,
+                                                            iterations, 
+                                                            loss_fn,
+                                                            lr=lr,
+                                                            weight_penalty=weight_penalty,
+                                                            device=device,
+                                                            print_every=20)
+                        time_end = time.time()
+                        training_time = training_time + time_end - time_start
+                        
+                        loss_hist = torch.cat((loss_hist, loss_hist_new))
+                        loss_hist_val = torch.cat((loss_hist_val, loss_hist_val_new))
+                        model.to('cpu')
+                        preds = model(u_test)
+                        
+                        r2 = 1. - torch.mean(((preds.flatten(start_dim=1)-y_test.flatten(start_dim=1))**2).mean(axis=1)/y_test.flatten(start_dim=1).var(axis=1))
+                        if r2 < desired_r2:
+                            # abandon current model and reinitialise
+                            if n_retrains >= max_n_retrains:
+                                print("Break training to avoid infinite retraining loop. Adjust training parameters and rerun the code.")
+                                print("Trained {:g} models.".format(m))
+                                print()
+                                break
+                            print("Model retraining failed. R2 = {:.2f} < {:.2f}, reinitialising model.".format(r2, desired_r2))
+                            print()
+                            m -= 1
+                            continue
+                        else:
+                            n_retrains -= 1 # let a successful retraining give more "slack" for later retrainings
+                
+                # calculate test loss
+                test_loss = loss_fn(preds, y_test).item()
+                metrics["test_loss"].append(test_loss)
+                metrics["R2"].append( r2 )
+                metrics["training_times"].append(training_time)
+                
                 models_list.append(model)
                 
-                loss_histories.append(loss_history.to('cpu'))
-                
-                preds = model(u_test)
-                loss_test = loss_fn(preds, y_test).item()
-                metrics["test_loss"].append(loss_test)
-                metrics["R2"].append( 1. - loss_test/(y_test**2).mean() )
-                
-                # save training_loss
-                filename_loss_history = "loss_history_" + model_params + "_" + str(lr) + ".pkl"
-                with open(os.path.join(data_dir, filename_loss_history), "wb") as outfile:
-                    pickle.dump(loss_histories, outfile)
-                # save metrics
-                filename_metrics = "metrics_" + model_params + "_" + str(lr) + ".pkl"
-                with open(os.path.join(data_dir, filename_metrics), "wb") as outfile:
-                    pickle.dump(metrics, outfile)
-                # save models
-                filename_models_list = "models_list_" + model_params + "_" + str(lr) + ".pkl"
-                with open(os.path.join(data_dir, filename_models_list), "wb") as outfile:
-                    pickle.dump(models_list, outfile)
+                loss_histories["train"].append(loss_hist.to('cpu'))
+                loss_histories["validation"].append(loss_hist_val.to('cpu'))
                 
                 print()
+                
+            # save training_loss
+            filename_loss_history = "loss_history_" + model_params + "_" + str(lr) + ".pkl"
+            with open(os.path.join(data_dir, filename_loss_history), "wb") as outfile:
+                pickle.dump(loss_histories, outfile)
+            # save metrics
+            filename_metrics = "metrics_" + model_params + "_" + str(lr) + ".pkl"
+            with open(os.path.join(data_dir, filename_metrics), "wb") as outfile:
+                pickle.dump(metrics, outfile)
+            # save models
+            filename_models_list = "models_list_" + model_params + "_" + str(lr) + ".pkl"
+            with open(os.path.join(data_dir, filename_models_list), "wb") as outfile:
+                pickle.dump(models_list, outfile)
+            
+            print()
 print()
 print("####################################")
 print("#         Training complete.       #")
