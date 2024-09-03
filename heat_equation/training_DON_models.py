@@ -19,14 +19,17 @@ from utils.training_routines import train_DON
 from CustomDataset import *
 from generate_data_heat_eq import generate_data, augment_data
 
-cuda = 0 #1,2,3
+try:
+    cuda = int(sys.argv[-1])
+except:
+    cuda = 0 # 1,2,3
 
 # seed pytorch RNG
 seed = 1234
 torch.manual_seed(seed)
 
 if torch.cuda.is_available():
-    print("Using CUDA\n")
+    print("Using CUDA", cuda)
     device = torch.device("cuda:{}".format(cuda))
 else:
     print("Using CPU\n")
@@ -60,15 +63,13 @@ x0 = 0.; xf = x0 + L
 y_IC = 0.5*torch.sin(torch.linspace(0., 2*np.pi, refinement_x*(N_x-1)+1))**2 # initial condition on state is double peak with amplitude 2
 y_BCs = (torch.zeros(refinement_t*(N_t-1) + 1), torch.zeros(refinement_t*(N_t-1)+1)) # Dirichlet boundary conditions on state
 
-y_d = 0.5*torch.sin(torch.linspace(0., np.pi, N_t))**10 # desired state for OC is single peak
-
 n_models = 5
 
 ################################
 # Generate train and test data #
 ################################
 
-n_train = 5000 # no. of training samples
+n_train = 3000 # no. of training samples
 n_test = 500 # no. of test samples
 n_val = 400 # no. of training samples
 batch_size_fun = 50 # minibatch size during SGD
@@ -104,7 +105,7 @@ else:
     augment_data(data, n_augmented_samples=2000, n_combinations=5, max_coeff=2)
     data["tx"].requires_grad = True
     train_data = n_models*[data]
-
+assert False
 # generate test and validation data
 test_data = generate_data_func(n_test-200)
 augment_data(test_data, n_augmented_samples=200, n_combinations=5, max_coeff=2)

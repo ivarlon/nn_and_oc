@@ -23,10 +23,13 @@ from generate_data_heat_eq import generate_data, augment_data
 seed = 123
 torch.manual_seed(seed)
 
-cuda = 0 # 1,2,3
+try:
+    cuda = int(sys.argv[-1])
+except:
+    cuda = 0 # 1,2,3
 
 if torch.cuda.is_available():
-    print("Using CUDA")
+    print("Using CUDA", cuda)
     device = torch.device("cuda:{}".format(cuda))
 else:
     print("Using CPU")

@@ -23,11 +23,14 @@ from generate_data_heat_eq import generate_data, augment_data
 seed = 4321
 torch.manual_seed(seed)
 
-cuda = 0 #1,2,3
+try:
+    cuda = int(sys.argv[-1])
+except:
+    cuda = 0 # 1,2,3
 
 if torch.cuda.is_available():
-    print("Using CUDA\n")
-    device = torch.device("cuda:0")
+    print("Using CUDA", cuda)
+    device = torch.device("cuda:{}".format(cuda))
 else:
     print("Using CPU\n")
     device = torch.device("cpu")
@@ -43,8 +46,8 @@ if not os.path.exists(data_dir):
 
 diffusion_coeff = 1e-1 # coefficient multiplying curvature term y_xx
 
-N_t = 16 # number of time points t_i
-N_x = 8 # number of spatial points x_j
+N_t = 64 # number of time points t_i
+N_x = 32 # number of spatial points x_j
 
 # time span
 T = 1.
@@ -60,20 +63,20 @@ p_BCs = (torch.zeros(N_t), torch.zeros(N_t)) # zero Dirichlet boundary condition
 
 y_d = 0.5*torch.sin(torch.linspace(0., np.pi, N_t)[:,None].repeat(1,N_x))**10 # desired state for OC is single peak
 
-n_models = 1
+n_models = 3
 
 ################################
 # Generate train and test data #
 ################################
 
-n_train = 500 # no. of training samples
+n_train = 5000 # no. of training samples
 n_test = 500 # no. of test samples
 n_val = 400 # no. of training samples
 batch_size_fun = 50 # minibatch size during SGD
 batch_size_loc = N_x*N_t # no. of minibatch domain points. Get worse performance when not using entire domain :/
 n_t_coeffs = 4
 n_x_coeffs = 5
-y_yd_max = 10. # maximum amplitude of y-y_d
+y_yd_max = 10. # maximum amplitude of y-y_d used for training
 
 generate_data_func = lambda n_samples: generate_data(N_t, N_x, t_span=(t0,tf), x_span=(x0,xf),
                   IC=p_TC,
@@ -91,8 +94,8 @@ different_data = True
 if different_data:
     train_data = []
     for m in range(n_models):
-        data = generate_data_func(n_train-200)
-        augment_data(data, n_augmented_samples=200, n_combinations=5, max_coeff=2, adjoint=True)
+        data = generate_data_func(n_train-2000)
+        augment_data(data, n_augmented_samples=2000, n_combinations=5, max_coeff=2, adjoint=True)
         data["tx"].requires_grad = True
         train_data.append(data)
 else:
@@ -191,7 +194,7 @@ Train the various models
 """
 retrain_if_low_r2 = False # retrain model one additional time if R2 on test set is below desired score. The model is discarded and a new one initialised if the retrain still yields R2<0.95.
 max_n_retrains = 20 # max. no. of retrains (to avoid potential infinite retrain loop)
-desired_r2 = 0.95
+desired_r2 = 0.99
 
 for n_conv_layers in n_conv_layers_list:
     print("Using", n_conv_layers, "conv layers")
