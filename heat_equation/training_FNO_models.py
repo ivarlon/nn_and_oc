@@ -55,7 +55,7 @@ L = 2.
 x0 = 0.; xf = x0 + L
 
 # boundary conditions
-y_IC = 2.*torch.sin(torch.linspace(0., 2*np.pi, N_x))**2 # initial condition on state is double peak with amplitude 2
+y_IC = 0.5*torch.sin(torch.linspace(0., 2*np.pi, N_x))**2 # initial condition on state is double peak with amplitude 2
 y_BCs = (torch.zeros(N_t), torch.zeros(N_t)) # Dirichlet boundary conditions on state
 
 n_models = 3 # number of models to train
@@ -118,7 +118,7 @@ dataset_val = (flatten_tensors(val_data["u"]).to(device), flatten_tensors(val_da
 #######################################
 
 d_u = 1 # dimension of input u(x_i): u is an Nxd_u array
-architectures = torch.cartesian_prod(torch.arange(2,5), torch.tensor([2,4,8,16])) # pairs of (n_layers, d_v)
+architectures = torch.cartesian_prod(torch.arange(2,5), torch.tensor([2,4,8,16,32])) # pairs of (n_layers, d_v)
 
 loss_fn = torch.nn.MSELoss()
 
