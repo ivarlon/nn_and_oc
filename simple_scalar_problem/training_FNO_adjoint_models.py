@@ -25,9 +25,11 @@ from generate_data import generate_data, augment_data
 seed = 54321
 torch.manual_seed(seed)
 
+cuda = 1
+
 if torch.cuda.is_available():
     print("Using CUDA")
-    device = torch.device("cuda:1")
+    device = torch.device("cuda:{}".format(cuda))
 else:
     print("Using CPU")
     device = torch.device("cpu")
@@ -44,7 +46,7 @@ N = 64 # number of points x_i in domain
 pf = 0. # terminal condition on adjoint
 y_d = 1.5*torch.ones(N) # desired state
 
-n_models = 5 # no. of models to train
+n_models = 3 # no. of models to train
 
 ################################
 # Generate train and test data #
@@ -53,7 +55,7 @@ n_models = 5 # no. of models to train
 n_train = 5000 # no. of training samples
 n_test = 500 # no. of test samples
 n_val = 500
-batch_size = 200 # minibatch size during SGD
+batch_size = 50 # minibatch size during SGD
 basis = "Legendre"
 n_coeffs = 6
 
@@ -99,8 +101,8 @@ def loss_fn(preds, targets, weight_BC=1.):
 
 weight_penalties = [0.]
 
-iterations = 5000 # no. of training epochs
-learning_rates = [1e-2,1e-3] # learning rate
+iterations = 3000 # no. of training epochs
+learning_rates = [1e-3] # learning rate
 
 """
 Training models
@@ -126,8 +128,9 @@ for weight_penalty in weight_penalties:
                            R2 = [],
                            training_times=[])
             
-            # create list to store the training loss histories
-            loss_histories = []
+            loss_histories = dict(train = [],
+                                  validation = []) # dict to store loss histories
+            
             m = 0
             n_retrains = 0
             while m < n_models:
@@ -137,23 +140,25 @@ for weight_penalty in weight_penalties:
                 y_yd_train = data["y-y_d"].unsqueeze(-1)
                 p_train = data["p"]
                 model = FNO(n_layers, N, d_u, d_v)
-                dataset = BasicDataset(y_yd_train, p_train, device=device)
+                dataset = BasicDataset(y_yd_train, p_train)
                 dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
                 model.to(device)
                 time_start = time.time()
-                loss_history = train_FNO(model,
-                                    dataloader, 
-                                    dataset_val,
-                                    iterations, 
-                                    loss_fn,
-                                    lr=lr,
-                                    weight_penalty=weight_penalty)
+                loss_hist, loss_hist_val = train_FNO(model,
+                                                dataloader, 
+                                                dataset_val,
+                                                iterations, 
+                                                loss_fn,
+                                                lr=lr,
+                                                weight_penalty=weight_penalty,
+                                                device=device,
+                                                print_every=50)
                 time_end = time.time()
                 training_time = time_end - time_start
                 
                 model.to('cpu')
                 preds = model(y_yd_test)
-                test_loss = loss_fn(preds, p_test).item()
+                
                 r2 = 1. - torch.mean(((preds-p_test)**2).mean(axis=1)/p_test.var(axis=1))
                 if retrain_if_low_r2:
                     if r2 < desired_r2:
@@ -161,28 +166,31 @@ for weight_penalty in weight_penalties:
                         n_retrains += 1
                         model.to(device)
                         time_start = time.time()
-                        loss_history_new = train_FNO(model,
-                                            dataloader, 
-                                            dataset_val,
-                                            iterations, 
-                                            loss_fn,
-                                            lr=lr,
-                                            weight_penalty=weight_penalty)
+                        loss_hist_new, loss_hist_val_new = train_FNO(model,
+                                                                    dataloader, 
+                                                                    dataset_val,
+                                                                    iterations, 
+                                                                    loss_fn,
+                                                                    lr=lr,
+                                                                    weight_penalty=weight_penalty,
+                                                                    device=device,
+                                                                    print_every=50)
                         
                         time_end = time.time()
                         training_time = training_time + time_end - time_start
                         
-                        loss_history = torch.cat((loss_history, loss_history_new))
+                        loss_hist = torch.cat((loss_hist, loss_hist_new))
+                        loss_hist_val = torch.cat((loss_hist_val, loss_hist_val_new))
                         
                         model.to('cpu')
                         preds = model(y_yd_test)
-                        test_loss = loss_fn(preds, p_test).item()
+                        
                         r2 = 1. - torch.mean(((preds-p_test)**2).mean(axis=1)/p_test.var(axis=1))
                         if r2 < desired_r2:
                             # abandon current model and reinitialise
                             if n_retrains >= max_n_retrains:
                                 print("Break training to avoid infinite retraining loop. Adjust training parameters and rerun the code.")
-                                print("Trained {:g} models.".format(m))
+                                print("Trained {:g} models.".format(m-1))
                                 print()
                                 break
                             print("Model retraining failed. R2 = {:.2f} < 0.95, reinitialising model.".format(r2))
@@ -191,18 +199,18 @@ for weight_penalty in weight_penalties:
                             continue
                         else:
                             n_retrains -= 1 # let a successful retraining give more "slack" for later retrainings
-                    
-                models_list.append(model)
                 
-                loss_histories.append(loss_history.to('cpu'))
-                
-                metrics["training_times"].append(round(training_time, 1))
+                test_loss = loss_fn(preds, p_test).item()
                 metrics["test_loss"].append(test_loss)
                 metrics["R2"].append(r2)
+                metrics["training_times"].append(training_time)
                 
-                #i = 0
-                #plt.plot(np.linspace(0.,1.,N), preds[i].detach().numpy().ravel())
-                #plt.plot(np.linspace(0.,1.,N), y_test[i].detach().numpy().ravel(), linestyle="--")
+                models_list.append(model)
+                
+                loss_histories["train"].append(loss_hist.to('cpu'))
+                loss_histories["validation"].append(loss_hist_val.to('cpu'))
+                
+                
             print()
             
             # save training_loss

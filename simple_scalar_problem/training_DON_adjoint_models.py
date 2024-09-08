@@ -23,9 +23,11 @@ from generate_data import generate_data, augment_data
 seed = 4321
 torch.manual_seed(seed)
 
+cuda = 1
+
 if torch.cuda.is_available():
     print("Using CUDA")
-    device = torch.device("cuda:1")
+    device = torch.device("cuda:{}".format(cuda))
 else:
     print("Using CPU")
     device = torch.device("cpu")
@@ -38,11 +40,11 @@ data_dir = os.path.join(script_dir, problem_dir_name, data_dir_name)
 if not os.path.exists(data_dir):
         os.makedirs(data_dir)
 
-N = 64 # number of points x_i
+N = 128 # number of points x_i
 pf = 0. # terminal condition on adjoint
 y_d = 1.5*torch.ones(N) # desired state for OC
 
-n_models = 5
+n_models = 3
 
 ################################
 # Generate train and test data #
@@ -51,7 +53,7 @@ n_models = 5
 n_train = 5000 # no. of training samples
 n_test = 500 # no. of test samples
 n_val = 500 # no. of training samples
-batch_size_fun = 200 # minibatch size during SGD
+batch_size_fun = 50 # minibatch size during SGD
 batch_size_loc = N # no. of minibatch domain points. Get worse performance when not using entire domain :/
 basis = "Legendre"
 n_coeffs = 6
@@ -111,9 +113,13 @@ def physics_loss(y, x, p, weight_boundary=1.):
 input_size_branch = N
 input_size_trunk = 1
 
-architectures = [ ( [50,10], [10, 10] ),  ( [100,10], [20, 10] ), ( [100, 20], [20, 20] ), ( [200, 20], [20, 20] ), ( [500, 500, 50], [50, 50] ) ]
+architectures = [ ( [50, 10], [20, 10] ),  
+                 ( [100, 10], [20, 10] ), 
+                 ( [100, 100, 10], [20, 10] ), 
+                 ( [100, 10], [20, 20, 10] ), 
+                 ( [200, 40], [50, 40] ) ]
 #architectures = [([100,10], [20,10])]
-n_conv_layers_list = [0,2]
+n_conv_layers_list = [0,3]
 
 activation_branch = torch.nn.ReLU()
 activation_trunk = torch.nn.Sigmoid()
@@ -127,8 +133,8 @@ loss_fn_data = lambda preds, targets, u, x: weight_data * torch.nn.MSELoss()(pre
 
 weight_penalty = 0. # L2 penalty for NN weights
 
-iterations = 5000 # no. of training epochs
-learning_rates = [1e-2, 1e-3] # learning rates
+iterations = 3000 # no. of training epochs
+learning_rates = [1e-3] # learning rates
 # training loop uses Adam optimizer by default
 
 """
@@ -159,7 +165,8 @@ for n_conv_layers in n_conv_layers_list:
             # create dict to store the training loss histories
             loss_histories = dict(total = [], 
                               data = [],
-                              physics = [])
+                              physics = [],
+                              validation = [])
             m = 0
             n_retrains = 0
             while m < n_models:
@@ -169,7 +176,7 @@ for n_conv_layers in n_conv_layers_list:
                 y_yd_train = data["y-y_d"]
                 p_train = data["p"]
                 x_train = data["x"]
-                dataset = DeepONetDataset(y_yd_train, x_train, p_train, device=device)
+                dataset = DeepONetDataset(y_yd_train, x_train, p_train)
                 model = DeepONet(input_size_branch,
                                  input_size_trunk,
                                  branch_architecture,
@@ -182,33 +189,7 @@ for n_conv_layers in n_conv_layers_list:
                 model.to(device)
                 time_start = time.time()
                 
-                loss_history, loss_data_history, loss_physics_history = train_DON(model, 
-                                                                            dataset,
-                                                                            dataset_val,
-                                                                            iterations, 
-                                                                            loss_fn_data,
-                                                                            loss_fn_physics,
-                                                                            batch_size_fun=batch_size_fun,
-                                                                            batch_size_loc=batch_size_loc,
-                                                                            lr=lr,
-                                                                            weight_penalty=weight_penalty)
-                time_end = time.time()
-                training_time = time_end - time_start
-                
-                model.to("cpu")
-                preds = model(y_yd_test, x_test)
-                test_loss_data = torch.nn.MSELoss()(preds, p_test).item()
-                test_loss_physics = physics_loss(y_yd_test, x_test, preds).item()
-                test_losses = (test_loss_data, test_loss_physics)
-                
-                r2 = 1. - torch.mean(((preds-p_test)**2).mean(axis=1)/p_test.var(axis=1))
-                if retrain_if_low_r2:
-                    if r2 < desired_r2:
-                        print("R2 = {:.2f} < {:.2f}, retraining for {:g} epochs.".format(r2, desired_r2, iterations))
-                        n_retrains += 1
-                        model.to(device)
-                        time_start = time.time()
-                        loss_history_new, loss_data_history_new, loss_physics_history_new = train_DON(model, 
+                loss_hist, loss_data_hist, loss_physics_hist, loss_hist_val = train_DON(model, 
                                                                                     dataset,
                                                                                     dataset_val,
                                                                                     iterations, 
@@ -217,19 +198,44 @@ for n_conv_layers in n_conv_layers_list:
                                                                                     batch_size_fun=batch_size_fun,
                                                                                     batch_size_loc=batch_size_loc,
                                                                                     lr=lr,
-                                                                                    weight_penalty=weight_penalty)
+                                                                                    weight_penalty=weight_penalty,
+                                                                                    device=device,
+                                                                                    print_every=50)
+                time_end = time.time()
+                training_time = time_end - time_start
+                
+                model.to("cpu")
+                preds = model(y_yd_test, x_test)
+                
+                r2 = 1. - torch.mean(((preds-p_test)**2).mean(axis=1)/p_test.var(axis=1))
+                if retrain_if_low_r2:
+                    if r2 < desired_r2:
+                        print("R2 = {:.2f} < {:.2f}, retraining for {:g} epochs.".format(r2, desired_r2, iterations))
+                        n_retrains += 1
+                        model.to(device)
+                        time_start = time.time()
+                        loss_hist_new, loss_data_hist_new, loss_physics_hist_new, loss_hist_val_new = train_DON(model, 
+                                                                                                            dataset,
+                                                                                                            dataset_val,
+                                                                                                            iterations, 
+                                                                                                            loss_fn_data,
+                                                                                                            loss_fn_physics,
+                                                                                                            batch_size_fun=batch_size_fun,
+                                                                                                            batch_size_loc=batch_size_loc,
+                                                                                                            lr=lr,
+                                                                                                            weight_penalty=weight_penalty,
+                                                                                                            device=device,
+                                                                                                            print_every=50)
                         time_end = time.time()
                         training_time = training_time + time_end - time_start
                         
-                        loss_history = torch.cat((loss_history, loss_history_new))
-                        loss_data_history = torch.cat((loss_data_history, loss_data_history_new))
-                        loss_physics_history = torch.cat((loss_physics_history, loss_physics_history_new))
+                        loss_hist = torch.cat((loss_hist, loss_hist_new))
+                        loss_data_hist = torch.cat((loss_data_hist, loss_data_hist_new))
+                        loss_physics_hist = torch.cat((loss_physics_hist, loss_physics_hist_new))
+                        loss_hist_val = torch.cat((loss_hist_val, loss_hist_val_new))
                         
                         model.to("cpu")
                         preds = model(y_yd_test, x_test)
-                        test_loss_data = torch.nn.MSELoss()(preds, p_test).item()
-                        test_loss_physics = physics_loss(y_yd_test, x_test, preds).item()
-                        test_losses = (test_loss_data, test_loss_physics)
                         
                         r2 = 1. - torch.mean(((preds-p_test)**2).mean(axis=1)/p_test.var(axis=1))
                         
@@ -237,7 +243,7 @@ for n_conv_layers in n_conv_layers_list:
                             # abandon current model and reinitialise
                             if n_retrains >= max_n_retrains:
                                 print("Break training to avoid infinite retraining loop. Adjust training parameters and rerun the code.")
-                                print("Trained {:g} models.".format(m))
+                                print("Trained {:g} models.".format(m-1))
                                 print()
                                 break
                             print("Model retraining failed. R2 = {:.2f} < {:.2f}, reinitialising model.".format(r2, desired_r2))
@@ -247,18 +253,22 @@ for n_conv_layers in n_conv_layers_list:
                         else:
                             n_retrains -= 1 # let a successful retraining give more "slack" for later retrainings
                 
+                test_loss_data = torch.nn.MSELoss()(preds, p_test).item()
+                test_loss_physics = physics_loss(y_yd_test, x_test, preds).item()
+                test_losses = (test_loss_data, test_loss_physics)
+                
                 metrics["test_loss"].append(test_losses)
                 metrics["R2"].append(r2)
                 print("R2 = {:.2f}".format(r2))
                 
-                metrics["training_times"].append(round(training_time,1))
+                metrics["training_times"].append(training_time)
                 
                 models_list.append(model)
                 
-                loss_histories["total"].append(loss_history.to('cpu'))
-                loss_histories["data"].append(loss_data_history.to('cpu'))
-                loss_histories["physics"].append(loss_physics_history.to('cpu'))
-                
+                loss_histories["total"].append(loss_hist.to('cpu'))
+                loss_histories["data"].append(loss_data_hist.to('cpu'))
+                loss_histories["physics"].append(loss_physics_hist.to('cpu'))
+                loss_histories["validation"].append(loss_hist_val.to('cpu'))
                 
                 
             print()
