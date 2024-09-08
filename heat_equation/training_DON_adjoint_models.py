@@ -33,7 +33,7 @@ else:
     device = torch.device("cpu")
 
 # create data directory to store models and results
-data_dir_name = 'adjoint_experiments_DON_hehe'
+data_dir_name = 'adjoint_experiments_DON'
 problem_dir_name = "heat_equation"
 script_dir = os.path.dirname(os.path.abspath(__file__))
 data_dir = os.path.join(script_dir, problem_dir_name, data_dir_name)
@@ -183,7 +183,7 @@ loss_fn_data = lambda preds, targets, y, x: weight_data * torch.nn.MSELoss()(pre
 weight_penalty = 0. # L2 penalty for NN weights
 learning_rates = [1e-3]
 
-iterations = 5000 # no. of training epochs
+iterations = 3000 # no. of training epochs
 
 
 """

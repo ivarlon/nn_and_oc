@@ -60,13 +60,13 @@ x0 = 0.; xf = x0 + L
 y_IC = 0.5*torch.sin(torch.linspace(0., 2*np.pi, refinement_x*(N_x-1)+1))**2 # initial condition on state is double peak with amplitude 2
 y_BCs = (torch.zeros(refinement_t*(N_t-1) + 1), torch.zeros(refinement_t*(N_t-1)+1)) # Dirichlet boundary conditions on state
 
-n_models = 5
+n_models = 3
 
 ################################
 # Generate train and test data #
 ################################
 
-n_train = 3000 # no. of training samples
+n_train = 5000 # no. of training samples
 n_test = 500 # no. of test samples
 n_val = 400 # no. of training samples
 batch_size_fun = 50 # minibatch size during SGD
@@ -102,7 +102,7 @@ else:
     augment_data(data, n_augmented_samples=2000, n_combinations=5, max_coeff=2)
     data["tx"].requires_grad = True
     train_data = n_models*[data]
-assert False
+
 # generate test and validation data
 test_data = generate_data_func(n_test-200)
 augment_data(test_data, n_augmented_samples=200, n_combinations=5, max_coeff=2)
@@ -185,7 +185,7 @@ loss_fn_data = lambda preds, targets, u, x: weight_data * torch.nn.MSELoss()(pre
 weight_penalty = 0. # L2 penalty for NN weights
 learning_rates = [1e-3]
 
-iterations = 5000 # no. of training epochs
+iterations = 3000 # no. of training epochs
 
 
 """
