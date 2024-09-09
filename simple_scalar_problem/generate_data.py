@@ -115,9 +115,7 @@ def generate_data(N,
             noise = 1e-2*coeff_range*torch.randn(size=(n_samples, N), dtype=torch.float32)
             y += noise
         data["u"] = u
-        data["x"] = x.view(N,1).repeat(n_samples,1,1) # add batch axis 0 and axis 2 for dim(x) (=1)
         data["y"] = y.unsqueeze(-1) # add final singleton axis to match x.shape
-        return data
     
     else:
         # generates adjoint p by sampling y uniformly
@@ -127,9 +125,10 @@ def generate_data(N,
             noise = 1e-2*coeff_range*torch.randn(size=(n_samples, N), dtype=torch.float32)
             p += noise
         data["y-y_d"] = y - y_d
-        data["x"] = x.view(N,1).repeat(n_samples,1,1)
         data["p"] = p.unsqueeze(-1) # add final singleton axis to match x.shape
-        return data
+    
+    data["x"] = x.view(N,1).expand(n_samples,1,1) # add batch axis 0 and axis 2 for dim(x) (=1)
+    return data
     
 
 def augment_data(data, n_augmented_samples, n_combinations, max_coeff, adjoint=False):
@@ -161,13 +160,37 @@ def augment_data(data, n_augmented_samples, n_combinations, max_coeff, adjoint=F
     coeffs = coeffs/(coeffs.sum(dim=1, keepdims=True) + 1e-6)
     if not adjoint:
         y_aug = torch.einsum('nc..., nc...->n...', coeffs, y[idx] )
+        
+        # make sure variance of new samples is similar to original samples. Just do a convex combination
+        max_y = torch.max(torch.var(y, dim=tuple(torch.arange(1,y.ndim)))) # find max std. dev. of input samples. augmented samples should not greatly exceed this
+        unacceptably_large_samples = torch.where( torch.var( y_aug, dim=tuple(torch.arange(1,y.ndim))) > max_y)
+        n_bad_samples = len(unacceptably_large_samples)
+        convex_coeffs = torch.rand(size=(n_bad_samples, n_combinations))
+        convex_coeffs = convex_coeffs/(convex_coeffs.sum(dim=1, keepdims=True))
+        new_idx = torch.stack([ torch.randperm(n_samples)[:n_combinations] for i in range(n_bad_samples) ])
+        y_aug[unacceptably_large_samples] = torch.einsum('nc..., nc...->n...', convex_coeffs, y[new_idx] )
+        
         u_aug = torch.einsum('nc..., nc...->n...', coeffs, u[idx] )
+        u_aug[unacceptably_large_samples] = torch.einsum('nc..., nc...->n...', convex_coeffs, u[new_idx] )
+        
         data["u"] = torch.cat((u, u_aug))
         data["y"] = torch.cat((y, y_aug))
     else:
         p_aug = torch.einsum('nc..., nc...->n...', coeffs, p[idx] )
+        
+        # make sure variance of new samples is similar to original samples. Just do a convex combination
+        max_p = torch.max(torch.var(p, dim=tuple(torch.arange(1,p.ndim)))) # find max std. dev. of input samples. augmented samples should not greatly exceed this
+        unacceptably_large_samples = torch.where( torch.var( p_aug, dim=tuple(torch.arange(1,p.ndim))) > max_p)
+        n_bad_samples = len(unacceptably_large_samples)
+        convex_coeffs = torch.rand(size=(n_bad_samples, n_combinations))
+        convex_coeffs = convex_coeffs/(convex_coeffs.sum(dim=1, keepdims=True))
+        new_idx = torch.stack([ torch.randperm(n_samples)[:n_combinations] for i in range(n_bad_samples) ])
+        p_aug[unacceptably_large_samples] = torch.einsum('nc..., nc...->n...', convex_coeffs, p[new_idx] )
+        
         y_y_d_aug = torch.einsum('nc..., nc...->n...', coeffs, y_y_d[idx] )
+        y_y_d_aug[unacceptably_large_samples] = torch.einsum('nc..., nc...->n...', convex_coeffs, y_y_d[new_idx] )
+        
         data["y-y_d"] = torch.cat((y_y_d, y_y_d_aug))
         data["p"] = torch.cat((p, p_aug))
     
-    data["x"] = torch.cat((x, x[0].repeat(n_augmented_samples,1,1)))
+    data["x"] = torch.cat((x, x[0].expand(n_augmented_samples,1,1)))
