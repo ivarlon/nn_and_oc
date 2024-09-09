@@ -127,7 +127,7 @@ def generate_data(N,
         data["y-y_d"] = y - y_d
         data["p"] = p.unsqueeze(-1) # add final singleton axis to match x.shape
     
-    data["x"] = x.view(N,1)[None].expand(n_samples,1,1) # add batch axis 0 and axis 2 for dim(x) (=1)
+    data["x"] = x.view(1,N,1).expand(n_samples,N,1) # add batch axis 0 and axis 2 for dim(x) (=1)
     return data
     
 
@@ -193,4 +193,4 @@ def augment_data(data, n_augmented_samples, n_combinations, max_coeff, adjoint=F
         data["y-y_d"] = torch.cat((y_y_d, y_y_d_aug))
         data["p"] = torch.cat((p, p_aug))
     
-    data["x"] = torch.cat((x, x[0].expand(n_augmented_samples,1,1)))
+    data["x"] = torch.cat((x, x[0].expand(n_augmented_samples,x.shape[1],1)))

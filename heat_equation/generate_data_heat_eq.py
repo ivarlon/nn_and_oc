@@ -122,9 +122,7 @@ def generate_data(N_t,
             y += noise
         # return u and y as (n_samples, N_t*N_x) shaped arrays
         data["u"] = u[:,::refinement_t,::refinement_x]
-        data["tx"] = torch.cartesian_prod(t[::refinement_t], x[::refinement_x])[None].expand(n_samples,N_t*N_x,2)
         data["y"] = y[:,::refinement_t,::refinement_x]
-        return data
     
     else:
         if IC is None:
@@ -137,9 +135,11 @@ def generate_data(N_t,
         if add_noise:
             p += noise
         data["y-y_d"] = (y-y_d)[:,::refinement_t,::refinement_x]
-        data["tx"] = torch.cartesian_prod(t[::refinement_t], x[::refinement_x])[None].expand(n_samples,N_t*N_x,2)
         data["p"] = p[:,::refinement_t,::refinement_x]
-        return data
+    
+    data["tx"] = torch.cartesian_prod(t[::refinement_t], x[::refinement_x])[None].expand(n_samples,N_t*N_x,2)    
+    
+    return data
     
 
 def augment_data(data, n_augmented_samples, n_combinations, max_coeff, adjoint=False):
