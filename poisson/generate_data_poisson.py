@@ -158,11 +158,13 @@ def augment_data(data, n_augmented_samples, n_combinations, max_coeff, adjoint=F
         u_max = torch.max(u[idx].abs())
         samples_exceeding_max = torch.unique(torch.where(u_aug.abs()>u_max)[0])
         n_samples_above_threshold = len(samples_exceeding_max)
-        convex_coeffs = torch.rand(size=(n_samples_above_threshold, n_combinations))
-        convex_coeffs = convex_coeffs/(convex_coeffs.sum(dim=1, keepdims=True))
-        new_idx = torch.stack([ torch.randperm(n_samples)[:n_combinations] for i in range(n_samples_above_threshold) ])
-        y_aug[samples_exceeding_max] = torch.einsum('nc..., nc...->n...', convex_coeffs, y[new_idx] )
-        u_aug[samples_exceeding_max] = torch.einsum('nc..., nc...->n...', convex_coeffs, u[new_idx] )
+        
+        if n_samples_above_threshold>0:
+            convex_coeffs = torch.rand(size=(n_samples_above_threshold, n_combinations))
+            convex_coeffs = convex_coeffs/(convex_coeffs.sum(dim=1, keepdims=True))
+            new_idx = torch.stack([ torch.randperm(n_samples)[:n_combinations] for i in range(n_samples_above_threshold) ])
+            y_aug[samples_exceeding_max] = torch.einsum('nc..., nc...->n...', convex_coeffs, y[new_idx] )
+            u_aug[samples_exceeding_max] = torch.einsum('nc..., nc...->n...', convex_coeffs, u[new_idx] )
         
         data["u"] = torch.cat((u, u_aug))
         data["y"] = torch.cat((y, y_aug))

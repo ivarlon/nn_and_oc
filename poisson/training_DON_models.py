@@ -41,7 +41,7 @@ if not os.path.exists(data_dir):
         os.makedirs(data_dir)
 
 
-N = 32 # number of points along each direction
+N = 128 # number of points along each direction
 
 # size of domain
 L = 1.
@@ -49,7 +49,7 @@ L = 1.
 # boundary conditions
 BCs = [torch.zeros(N) for i in range(4)] # Dirichlet boundary conditions on state
 
-n_models = 1
+n_models = 3
 
 ################################
 # Generate train and test data #
@@ -84,7 +84,7 @@ else:
     augment_data(data, n_augmented_samples=2000, n_combinations=5, max_coeff=2)
     data["r"].requires_grad = True
     train_data = n_models*[data]
-assert False
+
 # generate test and validation data
 test_data = generate_data_func(n_test-200)
 augment_data(test_data, n_augmented_samples=200, n_combinations=5, max_coeff=2)
@@ -165,7 +165,7 @@ loss_fn_data = lambda preds, targets, u, x: weight_data * torch.nn.MSELoss()(pre
 weight_penalty = 0. # L2 penalty for NN weights
 learning_rates = [1e-3]
 
-iterations = 10 # no. of training epochs
+iterations = 3000 # no. of training epochs
 
 
 """
