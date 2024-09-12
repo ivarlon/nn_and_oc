@@ -49,7 +49,7 @@ L = 1.
 # boundary conditions
 BCs = [torch.zeros(N) for i in range(4)] # Dirichlet boundary conditions on state
 
-n_models = 1
+n_models = 3
 
 ################################
 # Generate train and test data #
