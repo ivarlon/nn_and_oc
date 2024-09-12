@@ -10,6 +10,7 @@ sys.path.append(str(root))
 sys.path.append(str(root / "utils"))
 sys.path.append(str(root / "simple_scalar_problem"))
 sys.path.append(str(root / "heat_equation"))
+sys.path.append(str(root / "poisson"))
 
 def run_script(script_path):
     with open(script_path) as file:
