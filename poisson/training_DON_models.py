@@ -19,7 +19,7 @@ from utils.training_routines import train_DON
 from CustomDataset import *
 from generate_data_poisson import generate_data, augment_data
 
-cuda = 1 # 1,2,3
+cuda = 2 # 1,2,3
 
 # seed pytorch RNG
 seed = 12
@@ -41,7 +41,7 @@ if not os.path.exists(data_dir):
         os.makedirs(data_dir)
 
 
-N = 128 # number of points along each direction
+N = 32 # number of points along each direction
 
 # size of domain
 L = 1.
@@ -49,7 +49,7 @@ L = 1.
 # boundary conditions
 BCs = [torch.zeros(N) for i in range(4)] # Dirichlet boundary conditions on state
 
-n_models = 3
+n_models = 1
 
 ################################
 # Generate train and test data #
@@ -74,8 +74,8 @@ different_data = True
 if different_data:
     train_data = []
     for m in range(n_models):
-        data = generate_data_func(n_train)
-        #augment_data(data, n_augmented_samples=100, n_combinations=5, max_coeff=2)
+        data = generate_data_func(n_train-2000)
+        augment_data(data, n_augmented_samples=2000, n_combinations=5, max_coeff=2)
         data["r"].requires_grad = True
         train_data.append(data)
 else:
@@ -84,17 +84,15 @@ else:
     augment_data(data, n_augmented_samples=2000, n_combinations=5, max_coeff=2)
     data["r"].requires_grad = True
     train_data = n_models*[data]
-#train_data[0]["y"] = train_data[0]["y"][0][None].repeat(n_train,1,1)
-#train_data[0]["u"] = train_data[0]["u"][0][None].repeat(n_train,1,1)
 assert False
 # generate test and validation data
 test_data = generate_data_func(n_test-200)
-#augment_data(test_data, n_augmented_samples=200, n_combinations=5, max_coeff=2)
+augment_data(test_data, n_augmented_samples=200, n_combinations=5, max_coeff=2)
 test_data["r"].requires_grad = True
 u_test = (test_data["u"] + u_shift).log(); r_test = test_data["r"]; y_test = test_data["y"]
 
 val_data = generate_data_func(n_val-20)
-#augment_data(val_data, n_augmented_samples=20, n_combinations=5, max_coeff=2)
+augment_data(val_data, n_augmented_samples=20, n_combinations=5, max_coeff=2)
 val_data["r"].requires_grad = True
 dataset_val = ((val_data["u"] + u_shift).log().to(device), val_data["r"].to(device), val_data["y"].to(device))
 
@@ -167,7 +165,7 @@ loss_fn_data = lambda preds, targets, u, x: weight_data * torch.nn.MSELoss()(pre
 weight_penalty = 0. # L2 penalty for NN weights
 learning_rates = [1e-3]
 
-iterations = 3000 # no. of training epochs
+iterations = 10 # no. of training epochs
 
 
 """
