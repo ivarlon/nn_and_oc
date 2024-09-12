@@ -41,7 +41,7 @@ if not os.path.exists(data_dir):
         os.makedirs(data_dir)
 
 
-N = 32 # number of points along each direction
+N = 128 # number of points along each direction
 
 # size of domain
 L = 1.
@@ -55,14 +55,14 @@ n_models = 1
 # Generate train and test data #
 ################################
 
-n_train = 800 # no. of training samples
+n_train = 5000 # no. of training samples
 n_test = 500 # no. of test samples
 n_val = 30 # no. of training samples
-batch_size_fun = 30 # minibatch size during SGD
+batch_size_fun = 50 # minibatch size during SGD
 batch_size_loc = N**2 # no. of minibatch domain points. Get worse performance when not using entire domain :/
 
 u_max = 80. # maximum amplitude of control
-u0 = 100.
+u_shift = 100.
 generate_data_func = lambda n_samples: generate_data(N,
                   L,
                   BCs=[bc.numpy() for bc in BCs],
@@ -84,18 +84,19 @@ else:
     augment_data(data, n_augmented_samples=2000, n_combinations=5, max_coeff=2)
     data["r"].requires_grad = True
     train_data = n_models*[data]
-train_data[0]["y"] = train_data[0]["y"][0][None].repeat(n_train,1,1)
-train_data[0]["u"] = train_data[0]["u"][0][None].repeat(n_train,1,1)
+#train_data[0]["y"] = train_data[0]["y"][0][None].repeat(n_train,1,1)
+#train_data[0]["u"] = train_data[0]["u"][0][None].repeat(n_train,1,1)
+assert False
 # generate test and validation data
 test_data = generate_data_func(n_test-200)
 #augment_data(test_data, n_augmented_samples=200, n_combinations=5, max_coeff=2)
 test_data["r"].requires_grad = True
-u_test = (test_data["u"] + u0).log(); r_test = test_data["r"]; y_test = test_data["y"]
+u_test = (test_data["u"] + u_shift).log(); r_test = test_data["r"]; y_test = test_data["y"]
 
 val_data = generate_data_func(n_val-20)
 #augment_data(val_data, n_augmented_samples=20, n_combinations=5, max_coeff=2)
 val_data["r"].requires_grad = True
-dataset_val = ((val_data["u"] + u0).log().to(device), val_data["r"].to(device), val_data["y"].to(device))
+dataset_val = ((val_data["u"] + u_shift).log().to(device), val_data["r"].to(device), val_data["y"].to(device))
 
 ################
 # physics loss #
@@ -113,13 +114,16 @@ def PDE_interior(u,x,y):
     
     dy_xx = dy_xx.view(y.shape[0], N, N)
     dy_yy = dy_yy.view(y.shape[0], N, N)
-    return dy_xx[:,1:-1,1:-1] + dy_yy[:,1:-1,1:-1] + u.view_as(dy_xx)[:,1:-1,1:-1]
+    
+    laplacian_transformed = torch.log(-(dy_xx + dy_yy) + u_shift) # transform laplacian in same way as control u
+    
+    return laplacian_transformed[:,1:-1,1:-1] - u.view_as(dy_xx)[:,1:-1,1:-1]
 
 def physics_loss(u, x, y, BCs, weight_BC=1.):
     # y = y(x;u) is output of DeepONet, tensor of shape (n_samples, n_domain_points, dim(Y))
     # x is input tensor and has shape (n_samples, n_domain_points, dim(X))
     interior_loss = (PDE_interior(u, x, y)**2).mean()
-    
+    #print(interior_loss)
     n_fun_samples = y.shape[0]
     y_reshaped = y.view(n_fun_samples, N, N) # (n_samples, N_t, N_x)
     
@@ -141,7 +145,7 @@ architectures = [([100,40], [100,40]),
                  ([100,100,40], [100,40]),
                  ([100,40], [100,100,40]),
                  ([200,100], [200,100]),
-                 ([200,200,100], [200,100]  ) ][2:2+1]
+                 ([200,200,100], [200,100]  ) ][cuda:cuda+1]
 n_conv_layers_list = [0,3][1:]
 
 activation_branch = torch.nn.Sigmoid()
@@ -163,7 +167,7 @@ loss_fn_data = lambda preds, targets, u, x: weight_data * torch.nn.MSELoss()(pre
 weight_penalty = 0. # L2 penalty for NN weights
 learning_rates = [1e-3]
 
-iterations = 50 # no. of training epochs
+iterations = 3000 # no. of training epochs
 
 
 """
@@ -202,7 +206,7 @@ for n_conv_layers in n_conv_layers_list:
                 m += 1
                 print("Training model", str(m) + "/" + str(n_models))
                 data = train_data[m-1]
-                u_train = (data["u"] + u0).log()
+                u_train = (data["u"] + u_shift).log()
                 y_train = data["y"]
                 r_train = data["r"]
                 dataset = DeepONetDataset(u_train, r_train, y_train)
