@@ -42,7 +42,7 @@ data_dir = os.path.join(script_dir, problem_dir_name, data_dir_name)
 if not os.path.exists(data_dir):
         os.makedirs(data_dir)
 
-N = 64 # number of points x_i in domain
+N = 128 # number of points x_i in domain
 pf = 0. # terminal condition on adjoint
 y_d = 1.5*torch.ones(N) # desired state
 
