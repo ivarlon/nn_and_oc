@@ -12,7 +12,7 @@ def generate_controls(x1, x2,
                       min_n_combs=1,
                       normalize=True,
                       u_max=50.):
-    # generate controls u(t,x) as a superposition of Gaussians
+    # generate controls u(x1,x2) as a superposition of Gaussians
     L = x1[-1] # length of grid dimensions
     N = len(x1)
     

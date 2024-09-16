@@ -65,7 +65,7 @@ if __name__ == "__main__":
     #BCs[0] = np.sin(2*np.pi*np.linspace(0.,1.,N))**2*(np.exp(1.)-1.)
     u = - (np.exp(-(x2-1.))*np.sin(2*np.pi*x1)**2  + 8*np.pi**2*(1. - 2*np.sin(2*np.pi*x1)**2)*(np.exp(-(x2-1.)) - 1.) )
     u = u[None]
-    sigma = .1
+    sigma = .3
     x0, y0 = 0.8, 0.99
     exp_arg = (x1-x0)**2 + (x2-y0)**2
     u = 5000./(2*np.pi*sigma**2)*np.exp(-0.5*exp_arg/sigma**2)
@@ -74,7 +74,7 @@ if __name__ == "__main__":
     u += 5000./(2*np.pi*sigma**2)*np.exp(-0.5*exp_arg/sigma**2)
     x0, y0 = 0.01, 0.95
     exp_arg = (x1-x0)**2 + (x2-y0)**2
-    u += 5000./(2*np.pi*sigma**2)*np.exp(-0.5*exp_arg/sigma**2)
+    u -= 5000./(2*np.pi*sigma**2)*np.exp(-0.5*exp_arg/sigma**2)
     u/=3.
     """sigma = 1.8
     x0, y0 = 0.9, 0.01

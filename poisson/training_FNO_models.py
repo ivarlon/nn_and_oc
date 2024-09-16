@@ -106,7 +106,7 @@ dataset_val = (flatten_tensors((val_data["u"] + u_shift).log()).to(device), flat
 #######################################
 
 d_u = 1 # dimension of input u(x_i): u is an Nxd_u array
-architectures = torch.cartesian_prod(torch.arange(2,5), torch.tensor([2,4,8,16,32])) # pairs of (n_layers, d_v)
+architectures = torch.cartesian_prod(torch.arange(3,6), torch.tensor([4,8,16,32])) # pairs of (n_layers, d_v)
 
 loss_fn = torch.nn.MSELoss()
 

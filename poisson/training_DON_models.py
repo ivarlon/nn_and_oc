@@ -1,6 +1,10 @@
 # -*- coding: utf-8 -*-
 """
 Trains Deep Operator Networks (DeepONets) to solve Poisson equation
+
+The control/source is transformed before being input into the network:
+    u -> u + u_shift -> log(u + u_shift)
+This reduces the magnitude of u including the variance, and allows for better training.
 """
 
 # for saving data
@@ -41,7 +45,7 @@ if not os.path.exists(data_dir):
         os.makedirs(data_dir)
 
 
-N = 128 # number of points along each direction
+N = 64 # number of points along each direction
 
 # size of domain
 L = 1.
@@ -57,12 +61,12 @@ n_models = 3
 
 n_train = 5000 # no. of training samples
 n_test = 500 # no. of test samples
-n_val = 30 # no. of training samples
+n_val = 400 # no. of training samples
 batch_size_fun = 50 # minibatch size during SGD
 batch_size_loc = N**2 # no. of minibatch domain points. Get worse performance when not using entire domain :/
 
 u_max = 80. # maximum amplitude of control
-u_shift = 100.
+u_shift = 100. # we input the log of control to NN, : u + u_shift > -u_max + u_shift > 0
 generate_data_func = lambda n_samples: generate_data(N,
                   L,
                   BCs=[bc.numpy() for bc in BCs],
@@ -91,8 +95,8 @@ augment_data(test_data, n_augmented_samples=200, n_combinations=5, max_coeff=2)
 test_data["r"].requires_grad = True
 u_test = (test_data["u"] + u_shift).log(); r_test = test_data["r"]; y_test = test_data["y"]
 
-val_data = generate_data_func(n_val-20)
-augment_data(val_data, n_augmented_samples=20, n_combinations=5, max_coeff=2)
+val_data = generate_data_func(n_val-200)
+augment_data(val_data, n_augmented_samples=200, n_combinations=5, max_coeff=2)
 val_data["r"].requires_grad = True
 dataset_val = ((val_data["u"] + u_shift).log().to(device), val_data["r"].to(device), val_data["y"].to(device))
 
@@ -139,14 +143,13 @@ def physics_loss(u, x, y, BCs, weight_BC=1.):
 input_size_branch = (N, N)
 input_size_trunk = 2
 
-architectures = [([100,40], [100,40]),
-                 ([100,100,40], [100,40]),
-                 ([100,40], [100,100,40]),
-                 ([200,100], [200,100]),
-                 ([200,200,100], [200,100]  ) ][cuda:cuda+1]
-n_conv_layers_list = [0,3][1:]
+architectures = [([100,40], [100,100,40]),
+                 ([100,100,40], [100,100,40])
+                 ([200,80], [100,100,80]),
+                 ([200,100], [200,100])]
+n_conv_layers_list = [0,3]
 
-activation_branch = torch.nn.Sigmoid()
+activation_branch = torch.nn.ReLU()
 activation_trunk = torch.nn.Sigmoid()
 
 # weights for physics and data loss: loss = w_ph*loss_ph + w_d*loss_d
@@ -173,7 +176,7 @@ Train the various models
 """
 retrain_if_low_r2 = False # retrain model one additional time if R2 on test set is below desired score. The model is discarded and a new one initialised if the retrain still yields R2<0.95.
 max_n_retrains = 20 # max. no. of retrains (to avoid potential infinite retrain loop)
-desired_r2 = 0.95
+desired_r2 = 0.99
 
 for n_conv_layers in n_conv_layers_list:
     print("Using", n_conv_layers, "conv layers")
@@ -303,8 +306,9 @@ for n_conv_layers in n_conv_layers_list:
                 
                 
                 print()
+            
             print(metrics)
-            assert False
+            
             # save training_loss
             filename_loss_history = "loss_history_" + str(n_conv_layers) + "_" + model_params + "_" + str(lr) + ".pkl"
             with open(os.path.join(data_dir, filename_loss_history), "wb") as outfile:
