@@ -31,33 +31,38 @@ from generate_data import solve_state_eq, solve_adjoint_eq
 from optimization_routines import grad_descent, conjugate_gradient, linesearch
 
 N = 128 # no. of grid points
-nu = 1e-3 # penalty on control u
+nu = 1e-2 # penalty on control u
 y_d = 1.5*np.ones(shape=(1,N,1)) # desired state
 y0 = 1.
 x = np.linspace(0.,1.,N)
 delta_x = 1./(N-1)
 
+def load_models(filename):
+    with open(filename, 'rb') as infile:
+        models_list = pickle.load(infile)
+    return models_list
+
 class OC_problem:
     # This class defines functions to be used in the OC problem
-    def __init__(self, method_state, method_gradient, state_filename=None, adjoint_filename=None):
+    def __init__(self, method_state, method_gradient, nu, state_models=None, adjoint_models=None, model_name=None):
         """
         method_state (str) : method by which to calculate state y
                 either 'conventional' or 'NN'
         method_gradient (str) : method by which the gradient dJ/du is computed
                 either 'conventional adjoint', 'NN adjoint', 'NN tangent' (the latter doesn't calculate adjoint state)
         """
+        # penalty on control
+        self.nu = nu
         
         # create dictionary to hold models
-        self.models = dict(state = [],
-                           adjoint = [])
+        self.models = dict(state = state_models,
+                           adjoint = adjoint_models)
         
         # state methods
         if method_state == "conventional":
-            self.calculate_state = self.solve_state_eq
+            self.calculate_state = self.calculate_state_conventional
         
         elif method_state == "NN":
-            self.load_state_models(state_filename)
-            
             if model_name == "FNO":
                 self.calculate_state = self.calculate_state_FNO
             
@@ -77,8 +82,6 @@ class OC_problem:
             self.gradient_cost = self.gradient_cost_adjoint_method
         
         elif method_gradient == "NN adjoint":
-            # load models
-            self.load_adjoint_models(adjoint_filename)
             self.gradient_cost = self.gradient_cost_adjoint_method
             if model_name == "FNO":
                 self.calculate_adjoint = self.calculate_adjoint_FNO
@@ -97,23 +100,14 @@ class OC_problem:
         else:
             assert False, "Please specify a valid adjoint solver method: conventional adjoint, NN adjoint or NN tangent"
         
-    def reduced_cost(self, u):
-        y = self.calculate_state(u).mean(axis=0)[None]
-        return self.cost(y, u)
     
     def cost(self, y, u):
         # cost function to be minimised
-        return 0.5*delta_x*np.sum((y-y_d)**2) + 0.5*nu*delta_x*np.sum(u**2)
+        return 0.5*delta_x*np.sum((y-y_d)**2) + 0.5*self.nu*delta_x*np.sum(u**2)
     
-    def load_state_models(self, filename):
-        with open(filename, 'rb') as infile:
-            models_list = pickle.load(infile)
-        self.models["state"] = models_list
-    
-    def load_adjoint_models(self, filename):
-        with open(filename, 'rb') as infile:
-            models_list = pickle.load(infile)
-        self.models["adjoint"] = models_list
+    def reduced_cost(self, u):
+        y = self.calculate_state(u).mean(axis=0)[None]
+        return self.cost(y, u)
     
     def calculate_state_conventional(self, u):
         # uses improved forward Euler
@@ -137,7 +131,7 @@ class OC_problem:
     def calculate_adjoint_FNO(self, y):
         y_y_d = torch.tensor(y-y_d, dtype=torch.float32)
         # calculate ensemble predictions
-        p = torch.stack([model(y_y_d) for model in self.models["adjoint"] ])
+        p = torch.cat([model(y_y_d) for model in self.models["adjoint"] ])
         p = p.detach().numpy()
         return p
     
@@ -151,7 +145,7 @@ class OC_problem:
     def gradient_cost_adjoint_method(self, u):
         y = self.calculate_state(u)
         p = self.calculate_adjoint(y)
-        return nu*u + p.mean(axis=0)[None]
+        return self.nu*u + p.mean(axis=0)[None]
     
     def FNO_tangent(self, u):
         # Calculates gradient of cost as dJ = J_u + J_y dy/du
@@ -159,7 +153,7 @@ class OC_problem:
         # dy/du J_y = grad(NN;u)*(y-y_d)
         
         u_np = u
-        J_u = nu*u_np
+        J_u = self.nu*u_np
         u = torch.tensor(u, dtype=torch.float32, requires_grad=True)
         
         # Calculate vJp for dNN/du^T (y-y_d)
@@ -177,7 +171,7 @@ class OC_problem:
         # dy/du J_y = grad(NN;u)*(y-y_d)
         
         u_np = u
-        J_u = nu*u_np
+        J_u = self.nu*u_np
         u = torch.tensor(u, dtype=torch.float32, requires_grad=True)
         
         # Calculate vJp for dNN/du^T (y-y_d)
@@ -191,15 +185,16 @@ class OC_problem:
     
 if __name__ == "__main__":
     model_name = "DON" # NN model to use (if any) = FNO or DON
-    models = {} # stores the NN models in a dictionary
     
-    method_state = "NN"
-    method_gradient = "NN adjoint"
+    method_state = "conventional"
+    method_gradient = "conventional adjoint"
     
-    state_filename = glob.glob('.\{}_state\models_list*.pkl'.format(model_name))[0]
-    adjoint_filename = glob.glob('.\{}_adjoint\models_list*.pkl'.format(model_name))[0]
+    state_filename = glob.glob('.\\state_experiments_{}_15_models\\models_list*.pkl'.format(model_name))[0]
+    state_models = load_models(state_filename)[:10]
+    adjoint_filename = glob.glob('.\\adjoint_experiments_{}_15_models\\models_list*.pkl'.format(model_name))[0]
+    adjoint_models = load_models(adjoint_filename)[:10]
     
-    problem = OC_problem(method_state, method_gradient, state_filename, adjoint_filename)
+    problem = OC_problem(method_state, method_gradient, nu, state_models, adjoint_models, model_name)
     
     #====================
     # Do optimal control
@@ -207,8 +202,8 @@ if __name__ == "__main__":
     
     u0 = np.zeros(shape=(1,N,1))
     
-    max_no_iters = 10 # max. no. of optimisation iterations
-    
+    max_no_iters = 50 # max. no. of optimisation iterations
+    #assert False
     # time optimisation routine
     import time
     t0 = time.time()

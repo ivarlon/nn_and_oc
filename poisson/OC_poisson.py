@@ -51,13 +51,15 @@ solve_state_eq = lambda u: solve_poisson(u, BCs)
 
 class OC_problem:
     # This class defines functions to be used in the OC problem
-    def __init__(self, method_state, method_gradient, state_filename=None, adjoint_filename=None):
+    def __init__(self, method_state, method_gradient, nu, state_filename=None, adjoint_filename=None, model_name=None):
         """
         method_state (str) : method by which to calculate state y
                 either 'conventional' or 'NN'
         method_gradient (str) : method by which the gradient dJ/du is computed
                 either 'conventional adjoint', 'NN adjoint', 'NN tangent' (the latter doesn't calculate adjoint state)
         """
+        # penalty on control
+        self.nu = nu
         
         # create dictionary to hold models
         self.models = dict(state = [],
@@ -74,7 +76,7 @@ class OC_problem:
                 self.calculate_state = self.calculate_state_FNO
             
             elif model_name == "DON":
-                self.tx = torch.cartesian_prod(torch.tensor(t, dtype=torch.float32), torch.tensor(x, dtype=torch.float32))[None]
+                self.r = torch.cartesian_prod(torch.tensor(x1, dtype=torch.float32), torch.tensor(x2, dtype=torch.float32))[None]
                 self.calculate_state = self.calculate_state_DON
             
             else:
@@ -95,7 +97,7 @@ class OC_problem:
             if model_name == "FNO":
                 self.calculate_adjoint = self.calculate_adjoint_FNO
             elif model_name == "DON":
-                self.tx = torch.cartesian_prod(torch.tensor(t, dtype=torch.float32), torch.tensor(x, dtype=torch.float32))[None]
+                self.r = torch.cartesian_prod(torch.tensor(x1, dtype=torch.float32), torch.tensor(x2, dtype=torch.float32))[None]
                 self.calculate_adjoint = self.calculate_adjoint_DON
             else:
                 assert False, "Please enter a valid model name: 'DON' or 'FNO'."
@@ -111,7 +113,7 @@ class OC_problem:
 
     def cost(self, y, u):
         # cost function to be minimised
-        return 0.5*h**2*np.sum((y-y_d)**2) + 0.5*nu*h**2*np.sum(u**2)
+        return 0.5*h**2*np.sum((y-y_d)**2) + 0.5*self.nu*h**2*np.sum(u**2)
     
     def reduced_cost(self, u):
         y = self.calculate_state(u).mean(axis=0)[None]
@@ -134,14 +136,14 @@ class OC_problem:
     def calculate_state_FNO(self, u):
         # calculate ensemble predictions
         y = torch.cat([model(torch.tensor(u, dtype=torch.float32).unsqueeze(-1)) for model in self.models["state"] ])
-        y = y.view(len(y),N_t,N_x)
+        y = y.view(len(y),N,N)
         y = y.detach().numpy()
         return y
     
     def calculate_state_DON(self, u):
         # calculate ensemble predictions
-        y = torch.cat([model(torch.tensor(u, dtype=torch.float32), self.tx) for model in self.models["state"] ])
-        y = y.view(len(y),N_t,N_x)
+        y = torch.cat([model(torch.tensor(u, dtype=torch.float32), self.r) for model in self.models["state"] ])
+        y = y.view(len(y),N,N)
         y = y.detach().numpy()
         return y
     
@@ -152,29 +154,29 @@ class OC_problem:
         y_y_d = torch.tensor(y-y_d, dtype=torch.float32).unsqueeze(-1)
         # calculate ensemble predictions
         p = torch.cat([model(y_y_d) for model in self.models["adjoint"] ])
-        p = p.view(len(p),N_t,N_x)
+        p = p.view(len(p),N,N)
         p = p.detach().numpy()
         return p
     
     def calculate_adjoint_DON(self, y):
         y_y_d = torch.tensor(y-y_d, dtype=torch.float32)
         # calculate ensemble predictions
-        p = torch.cat([model(y_y_d, self.tx) for model in self.models["adjoint"] ])
-        p = p.view(len(p),N_t,N_x)
+        p = torch.cat([model(y_y_d, self.r) for model in self.models["adjoint"] ])
+        p = p.view(len(p),N,N)
         p = p.detach().numpy()
         return p
     
     def gradient_cost_adjoint_method(self, u):
         y = self.calculate_state(u)
         p = self.calculate_adjoint(y)
-        return nu*u - p.mean(axis=0)[None]
+        return self.nu*u - p.mean(axis=0)[None]
     
     def FNO_tangent(self, u):
         # Calculates gradient of cost as dJ = J_u + J_y dy/du
         # J_u = nu*u
         # dy/du J_y = grad(NN;u)*(y-y_d)
         u_np = u
-        J_u = nu*u_np
+        J_u = self.nu*u_np
         u = torch.tensor(u, dtype=torch.float32, requires_grad=True)
         
         # Calculate vJp for dNN/du^T (y-y_d)
@@ -192,11 +194,11 @@ class OC_problem:
         # dy/du J_y = grad(NN;u)*(y-y_d)
         
         u_np = u
-        J_u = nu*u_np
+        J_u = self.nu*u_np
         u = torch.tensor(u, dtype=torch.float32, requires_grad=True)
         
         # Calculate vJp for dNN/du^T (y-y_d)
-        calculate_state_vjp = lambda u: torch.stack([model(u,self.tx) for model in self.models["state"] ]).mean(axis=0)
+        calculate_state_vjp = lambda u: torch.stack([model(u,self.r) for model in self.models["state"] ]).mean(axis=0)
         y, grad_u = torch.func.vjp(calculate_state_vjp, u)
         y_y_d = y-torch.tensor(y_d).flatten().unsqueeze(-1)
         dJdy_times_dydu = grad_u(y_y_d)[0].detach().numpy()
@@ -213,7 +215,7 @@ if __name__=="__main__":
     state_filename = "hey"#glob.glob('.\{}_state\models_list*.pkl'.format(model_name))[0]
     adjoint_filename = "you"#glob.glob('.\{}_adjoint\models_list*.pkl'.format(model_name))[0]
     
-    problem = OC_problem(method_state, method_gradient, state_filename, adjoint_filename)
+    problem = OC_problem(method_state, method_gradient, nu, state_filename, adjoint_filename, model_name)
     
     
     #====================

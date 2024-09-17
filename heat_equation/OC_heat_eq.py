@@ -40,7 +40,7 @@ delta_x = L/(N_x-1)
 
 tt, xx = np.meshgrid(t,x, indexing='ij')
 
-nu = 1e-3 # penalty on control u
+nu = 1e-7 # penalty on control u
 
 # desired state for OC is single peak
 y_d = 0.5*np.sin(np.linspace(0., np.pi, N_t)[:,None].repeat(N_x,1))**10 
@@ -53,27 +53,32 @@ y_BCs = (np.zeros(N_t), np.zeros(N_t)) # Dirichlet boundary conditions on state
 p_TC = np.zeros(N_x) # terminal condition on adjoint is zero
 p_BCs = (np.zeros(N_t), np.zeros(N_t)) # zero Dirichlet boundary conditions
 
+def load_models(filename):
+    with open(filename, 'rb') as infile:
+        models_list = pickle.load(infile)
+    return models_list
+
 class OC_problem:
     # This class defines functions to be used in the OC problem
-    def __init__(self, method_state, method_gradient, state_filename=None, adjoint_filename=None):
+    def __init__(self, method_state, method_gradient, nu, state_models=None, adjoint_models=None, model_name=None):
         """
         method_state (str) : method by which to calculate state y
                 either 'conventional' or 'NN'
         method_gradient (str) : method by which the gradient dJ/du is computed
                 either 'conventional adjoint', 'NN adjoint', 'NN tangent' (the latter doesn't calculate adjoint state)
         """
+        # penalty on control
+        self.nu = nu
         
         # create dictionary to hold models
-        self.models = dict(state = [],
-                           adjoint = [])
+        self.models = dict(state = state_models,
+                           adjoint = adjoint_models)
         
         # state methods
         if method_state == "conventional":
-            self.calculate_state = self.solve_state_eq
+            self.calculate_state = self.calculate_state_conventional
         
         elif method_state == "NN":
-            self.load_state_models(state_filename)
-            
             if model_name == "FNO":
                 self.calculate_state = self.calculate_state_FNO
             
@@ -93,8 +98,6 @@ class OC_problem:
             self.gradient_cost = self.gradient_cost_adjoint_method
         
         elif method_gradient == "NN adjoint":
-            # load models
-            self.load_adjoint_models(adjoint_filename)
             self.gradient_cost = self.gradient_cost_adjoint_method
             if model_name == "FNO":
                 self.calculate_adjoint = self.calculate_adjoint_FNO
@@ -115,25 +118,15 @@ class OC_problem:
 
     def cost(self, y, u):
         # cost function to be minimised
-        return 0.5*delta_x*delta_t*np.sum((y-y_d)**2) + 0.5*nu*delta_x*delta_t*np.sum(u**2)
+        return 0.5*delta_x*delta_t*np.sum((y-y_d)**2) + 0.5*self.nu*delta_x*delta_t*np.sum(u**2)
     
     def reduced_cost(self, u):
         y = self.calculate_state(u).mean(axis=0)[None]
         return self.cost(y, u)
     
-    def load_state_models(self, filename):
-        with open(filename, 'rb') as infile:
-            models_list = pickle.load(infile)
-        self.models["state"] = models_list
-    
-    def load_adjoint_models(self, filename):
-        with open(filename, 'rb') as infile:
-            models_list = pickle.load(infile)
-        self.models["adjoint"] = models_list
-    
     def calculate_state_conventional(self, u):
         # uses Crank-Nicolson
-        return solve_state_eq(u)
+        return solve_state_eq(u, y_IC, y_BCs, diffusion_coeff, t_span=(0.,T), x_span=(0.,L))
     
     def calculate_state_FNO(self, u):
         # calculate ensemble predictions
@@ -171,14 +164,14 @@ class OC_problem:
     def gradient_cost_adjoint_method(self, u):
         y = self.calculate_state(u)
         p = self.calculate_adjoint(y)
-        return nu*u + p.mean(axis=0)[None]
+        return self.nu*u + p.mean(axis=0)[None]
     
     def FNO_tangent(self, u):
         # Calculates gradient of cost as dJ = J_u + J_y dy/du
         # J_u = nu*u
         # dy/du J_y = grad(NN;u)*(y-y_d)
         u_np = u
-        J_u = nu*u_np
+        J_u = self.nu*u_np
         u = torch.tensor(u, dtype=torch.float32, requires_grad=True)
         
         # Calculate vJp for dNN/du^T (y-y_d)
@@ -196,7 +189,7 @@ class OC_problem:
         # dy/du J_y = grad(NN;u)*(y-y_d)
         
         u_np = u
-        J_u = nu*u_np
+        J_u = self.nu*u_np
         u = torch.tensor(u, dtype=torch.float32, requires_grad=True)
         
         # Calculate vJp for dNN/du^T (y-y_d)
@@ -207,193 +200,98 @@ class OC_problem:
         y = y.detach().numpy()
         
         return J_u + dJdy_times_dydu
-"""
-def get_solvers_and_functions(method_state,method_gradient,state_models_list=None,adjoint_models_list=None):
-    # defining cost function to be minimised
-    def cost(y, u, y_d):
-        return 0.5*np.sum((y-y_d)**2) + 0.5*nu*np.sum(u**2)
-    #================================================
-    # Different cost functions and gradients thereof
-    # are defined in the following, according to 
-    # whatever method was selected.
-    #================================================
-    
-    #---------------
-    # state methods
-    #---------------
-    if method_state == "conventional":
-        calculate_state = lambda u: solve_state_eq(u, y_IC, y_BCs, diffusion_coeff, t_span=(0.,T), x_span=(0.,L))
-    
-    elif method_state == "NN":
-        # load saved neural operator models
-        assert not isinstance(state_models_list, type(None)), "Please pass a list of state models."
-        
-        n_models = len(state_models_list)
-        
-        if model_name=="FNO":
-            def calculate_state(u):
-                # average over ensemble predictions
-                y = torch.cat([model(torch.tensor(u, dtype=torch.float32).unsqueeze(-1)) for model in state_models_list ])
-                y = y.view(n_models,N_t,N_x)
-                y = y.detach().numpy()
-                return y
-        else:
-            tx = torch.cartesian_prod(torch.tensor(t, dtype=torch.float32), torch.tensor(x, dtype=torch.float32))[None]
-            def calculate_state(u):
-                # average over ensemble predictions
-                y = torch.cat([model(torch.tensor(u, dtype=torch.float32), tx) for model in state_models_list ])
-                y = y.view(n_models,N_t,N_x)
-                y = y.detach().numpy()
-                return y
-    else:
-        assert False, "Please specify a valid state solver method: conventional or NN"
-    
-    def reduced_cost(u, y_d):
-        y = calculate_state(u).mean(axis=0)[None]
-        return cost(y, u, y_d)
-    
-    
-    #-------------------------
-    # adjoint/gradient methods
-    #-------------------------
-    if method_gradient == "conventional adjoint":
-        calculate_adjoint = lambda y, y_d: solve_adjoint_eq(y, 
-                                                            y_d, 
-                                                            p_TC, 
-                                                            p_BCs, 
-                                                            diffusion_coeff, 
-                                                            t_span=(0.,T), 
-                                                            x_span=(0.,L))
-        def gradient_cost(u, y_d):
-            y = calculate_state(u)
-            p = calculate_adjoint(y, y_d)
-            return nu*u + p.mean(axis=0)[None]
-        
-    elif method_gradient == "NN adjoint":
-        
-        n_adj_models = len(adjoint_models_list)
-        
-        if model_name == "FNO":
-            def calculate_adjoint(y, y_d):
-                y_y_d = torch.tensor(y-y_d, dtype=torch.float32).unsqueeze(-1)
-                # calculate ensemble predictions
-                p = torch.cat([model(y_y_d) for model in adjoint_models_list ])
-                p = p.view(n_adj_models*y_y_d.shape[0],N_t,N_x)
-                p = p.detach().numpy()
-                return p
-        else:
-            tx = torch.cartesian_prod(torch.tensor(t, dtype=torch.float32), torch.tensor(x, dtype=torch.float32))[None]
-            def calculate_adjoint(y, y_d):
-                y_y_d = torch.tensor(y-y_d, dtype=torch.float32)
-                # calculate ensemble predictions
-                p = torch.cat([model(y_y_d, tx) for model in adjoint_models_list ])
-                p = p.view(n_adj_models*y_y_d.shape[0],N_t,N_x)
-                p = p.detach().numpy()
-                return p
-        
-        def gradient_cost(u, y_d):
-            y = calculate_state(u)
-            p = calculate_adjoint(y, y_d)
-            return nu*u + p.mean(axis=0)[None]
-    
-    elif method_gradient == "NN tangent":
-        assert method_state == "NN", "The NN tangent requires that you use an NN to calculate the state!"
-        if model_name == "FNO":
-            def gradient_cost(u, y_d):
-                # Calculates gradient of cost as dJ = J_u + J_y dy/du
-                # J_u = nu*u
-                # dy/du J_y = grad(NN;u)*(y-y_d)
-                
-                u_np = u
-                J_u = nu*u_np
-                u = torch.tensor(u, dtype=torch.float32, requires_grad=True)
-                
-                # Calculate vJp for dNN/du^T (y-y_d)
-                calculate_state_vjp = lambda u: torch.stack([model(u) for model in state_models_list]).mean(axis=0)
-                y, grad_u = torch.func.vjp(calculate_state_vjp, u)
-                y_y_d = y-torch.tensor(y_d).flatten().unsqueeze(-1)
-                dJdy_times_dydu = grad_u(y_y_d)[0].detach().numpy()
-                y = y.detach().numpy()
-                
-                return J_u + dJdy_times_dydu
-        else:
-            # use DeepONet which takes both control u and domain (t,x) as input
-            def gradient_cost(u, y_d):
-                # Calculates gradient of cost as dJ = J_u + J_y dy/du
-                # J_u = nu*u
-                # dy/du J_y = grad(NN;u)*(y-y_d)
-                
-                u_np = u
-                J_u = nu*u_np
-                u = torch.tensor(u, dtype=torch.float32, requires_grad=True)
-                
-                # Calculate vJp for dNN/du^T (y-y_d)
-                calculate_state_vjp = lambda u: torch.stack([model(u,tx) for model in state_models_list]).mean(axis=0)
-                y, grad_u = torch.func.vjp(calculate_state_vjp, u)
-                y_y_d = y-torch.tensor(y_d).flatten().unsqueeze(-1)
-                dJdy_times_dydu = grad_u(y_y_d)[0].detach().numpy()
-                y = y.detach().numpy()
-                
-                return J_u + dJdy_times_dydu
-    
-    else:
-        assert False, "Please specify a valid adjoint solver method: conventional adjoint, NN adjoint or NN tangent"
-    
-    
-    return calculate_state, cost, reduced_cost, gradient_cost
-"""
+
 if __name__=="__main__":
     model_name = "DON" # "DON" # NN model to use (if any)
-    #models = {} # stores the NN models in a dictionary
-
-    # available methods: 
-    #   state: conventional, NN
-    #   adjoint: conventional adjoint, NN adjoint, NN tangent (doesn't calculate adjoint)
-    method_state = "NN"
-    method_gradient = "NN adjoint"
     
-    state_filename = glob.glob('.\{}_state\models_list_3*.pkl'.format(model_name))[0]
+    method_state = "conventional"
+    method_gradient = "conventional adjoint"
+    
+    state_filename = glob.glob('.\{}_state\models_list*.pkl'.format(model_name))[0]
+    state_models = load_models(state_filename)
     adjoint_filename = glob.glob('.\{}_adjoint\models_list*.pkl'.format(model_name))[0]
+    adjoint_models = load_models(adjoint_filename)
     
-    problem = OC_problem(method_state, method_gradient, state_filename, adjoint_filename)
+    problem = OC_problem(method_state, method_gradient, nu, state_models, adjoint_models, model_name)
     
-    
-    #calculate_state, cost, reduced_cost, gradient_cost = get_solvers_and_functions(method_state, method_gradient, state_models_list, adjoint_models_list)
     
     #====================
     # Do optimal control
     #====================
         
     u0 = np.zeros_like(tt)[None] # initial guess is zero
-    max_no_iters = 30 # max. no. of optimisation iterations
+    max_no_iters = 10 # max. no. of optimisation iterations
     
     
     # time optimisation routine
     import time
     time_start = time.time()
     
-    from scipy.optimize import fmin_cg
-    from scipy.optimize import minimize
-    
-    #res = fmin_cg(lambda u: reduced_cost(u, y_d), u0, fprime=lambda u: gradient_cost(u, y_d))
-    
-    #result = minimize(lambda u: reduced_cost(u, y_d), u0, method='CG', jac=lambda u: gradient_cost(u, y_d), tol=1e-4, options={'maxiter': 100, 'disp': True})
-    #assert False
-    u_opt, cost_history, grad_history  = grad_descent(problem.reduced_cost,
+    u_history, cost_history, grad_history  = grad_descent(problem.reduced_cost,
                                              problem.gradient_cost,
                                              u0,
-                                             max_no_iters=max_no_iters)
+                                             max_no_iters=max_no_iters,
+                                             return_full_history=True)
     
     print()
     print("Optimisation took", round(time.time() - time_start, 1), "secs")
     
-    y_opt = problem.calculate_state(u_opt)[0]
-    #y_opt = solve_state_eq(u_opt, y_IC, y_BCs, diffusion_coeff, (0.,T), (0.,L))[0]
-    plt.contourf(tt, xx, y_opt, levels=np.linspace(y_opt.min(), y_opt.max())); plt.colorbar()
-    plt.xlabel("t"); plt.ylabel("x")
+    u_opt = u_history[-1]
+    
+    # plot optimal state
+    y_opt = problem.calculate_state(u_opt)#.mean(axis=0)
+    fig = plt.figure(figsize=(8 + 8*(method_state=="NN"),8))
+    ax0 = fig.add_subplot(111) if method_state=="conventional" else fig.add_subplot(121)
+    contour0 = ax0.contourf(tt, xx, y_opt.mean(axis=0), levels=np.linspace(y_opt.min(), y_opt.max()))
+    fig.colorbar(contour0, ax=ax0, label="$y$")
+    ax0.set_xlabel("$t$"); ax0.set_ylabel("$x$")
+    ax0.set_title("Optimal state, " + model_name*(method_state=="NN") + "conventional solver"*(method_state!="NN"))
+    
+    
+    if method_state=="NN":
+        ax1 = fig.add_subplot(122)
+        y_opt_actual = problem.calculate_state_conventional(u_opt).mean(axis=0)
+        rel_error = np.abs((y_opt - y_opt_actual)).mean(axis=0)#/(y_opt_actual + 1e-7))
+        contour1 = ax1.contourf(tt, xx, rel_error**0.5, levels=np.linspace((rel_error[rel_error<1e2]**0.5).min(), (rel_error[rel_error<1e2]**0.5).max()))
+        fig.colorbar(contour1, ax=ax1, label="$|\\tilde{y} - y|$")
+        ax1.set_xlabel("$t$"); ax1.set_ylabel("$x$")
+        ax1.set_title("Difference NO prediction and numerical solution")
+    fig.tight_layout() 
     plt.show()
-    plt.plot(np.arange(len(cost_history)), cost_history); plt.yscale("log")
-    plt.xlabel("Iteration"); plt.ylabel("Cost")
+    if method_state=="NN":
+        fig, axs = plt.subplots(ncols=len(y_opt), figsize=(18,6))
+        from matplotlib.ticker import FormatStrFormatter
+        contours = []
+        for i in range(len(y_opt)):
+            contours.append(axs[i].contourf(tt, xx, y_opt[i], levels=np.linspace(y_opt[i].min(), y_opt[i].max())))
+            cbar = fig.colorbar(contours[i], ax=axs[i])
+            cbar.ax.yaxis.set_major_formatter(FormatStrFormatter('%.2f'))
+        fig.tight_layout()
+        plt.show()
+    
+    # plot optimal control
+    fig, ax = plt.subplots(figsize=(8,8))
+    contour = ax.contourf(tt, xx, u_opt[0], levels=np.linspace(u_opt.min(), u_opt.max()))
+    fig.colorbar(contour, ax=ax, label="$u$")
+    ax.set_xlabel("$t$"); ax.set_ylabel("$x$")
+    ax.set_title("Optimal control, " + model_name*(method_state=="NN") + "conventional solver"*(method_state!="NN"))
+    plt.show()
+    
+    # plot cost history
+    fig = plt.figure(figsize=(8,6))
+    cost_plot = plt.plot(np.arange(len(cost_history)), cost_history)[0]
+    if method_state == "NN":
+        cost_plot.set_label("$J(\\tilde{y}, u)$")
+        cost_history_true = []
+        for u_ in u_history:
+            y_ = problem.calculate_state_conventional(u_)
+            cost_ = problem.cost(y_, u_)
+            cost_history_true.append(cost_)
+        plt.plot(np.arange(len(cost_history_true)), cost_history_true, linestyle="--", label="$J(y,u)$")
+    else:
+        cost_plot.set_label("$J(y, u)$")
+    plt.xlabel("Iteration"); plt.ylabel("Cost"); plt.yscale("log")
+    plt.legend()
     plt.show()
     
     """
