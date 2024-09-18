@@ -54,8 +54,8 @@ def bootstrap_OC(state_models_filename, adjoint_models_filename, problem, u0, ma
         for b in trange(B):
             
             # select n_models models randomly
-            state_models_idx = torch.randperm(len(state_models_list))[:n_models]
-            adjoint_models_idx = torch.randperm(len(adjoint_models_list))[:n_models]
+            state_models_idx = torch.randint(low=0, high=len(state_models_list), size=(n_models,))
+            adjoint_models_idx = torch.randint(low=0, high=len(adjoint_models_list), size=(n_models,))
             
             sampled_state_models = [state_models_list[i] for i in state_models_idx]
             sampled_adjoint_models = [adjoint_models_list[i] for i in adjoint_models_idx]
