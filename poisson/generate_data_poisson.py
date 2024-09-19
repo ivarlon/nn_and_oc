@@ -33,7 +33,7 @@ def generate_controls(x1, x2,
             continue
         coeffs = 2.*torch.rand(size=(number_of_controls_per_number_of_combs[i], m)) - 1.# weight for each Gaussian in mixture
         coeffs /= coeffs.sum(dim=1, keepdim=True) # normalize sum of coeffs to be equal to 1
-        
+        coeffs*= 0.9*u_max*torch.rand(size=(number_of_controls_per_number_of_combs[i],1)) + 0.1*u_max # scale coefficients again
         locations = L*torch.rand(size=(number_of_controls_per_number_of_combs[i], m, 2)) # location of each gaussian
         
         displacements = R[None,None]-locations[:,:,None,None]
