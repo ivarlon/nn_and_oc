@@ -143,25 +143,26 @@ def physics_loss(u, x, y, BCs, weight_BC=1.):
 input_size_branch = (N, N)
 input_size_trunk = 2
 
-architectures = [([100,40], [100,100,40]),
-                 ([100,100,40], [100,100,40])
-                 ([200,80], [100,100,80]),
-                 ([200,100], [200,100])]
+architectures = [([100,80], [100,100,80]),
+                 ([100,100,80], [100,80])
+                 ([100,100,80], [100,100,80]),
+                 ([200,160], [200,160]),
+                 ([200,200,160], [200,160])]
 n_conv_layers_list = [0,3]
 
 activation_branch = torch.nn.ReLU()
 activation_trunk = torch.nn.Sigmoid()
 
 # weights for physics and data loss: loss = w_ph*loss_ph + w_d*loss_d
-weight_physics = 0.5
+weight_physics = 0.
 weight_data = 1. - weight_physics
 
 # define loss functions (one for CPU evaluation, the other for device (cuda or CPU))
 BCs = [BCs[i].to(device) for i in range(4)]
 
 
-loss_fn_physics_CPU = lambda preds, targets, u, x: weight_physics * physics_loss(u, x, preds, [BCs[i].to('cpu') for i in range(4)])
-loss_fn_physics_device = lambda preds, targets, u, x: weight_physics * physics_loss(u, x, preds, BCs)
+loss_fn_physics_CPU = lambda preds, targets, u, x: torch.tensor(0.)#weight_physics * physics_loss(u, x, preds, [BCs[i].to('cpu') for i in range(4)])
+loss_fn_physics_device = lambda preds, targets, u, x: torch.tensor(0.)#weight_physics * physics_loss(u, x, preds, BCs)
 
 loss_fn_data = lambda preds, targets, u, x: weight_data * torch.nn.MSELoss()(preds.view_as(targets), targets)
 
