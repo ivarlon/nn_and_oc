@@ -23,7 +23,7 @@ from utils.training_routines import train_DON
 from CustomDataset import *
 from generate_data_poisson import generate_data, augment_data
 
-cuda = 2 # 1,2,3
+cuda = 0 # 1,2,3
 
 # seed pytorch RNG
 seed = 12
@@ -144,13 +144,13 @@ input_size_branch = (N, N)
 input_size_trunk = 2
 
 architectures = [([100,80], [100,100,80]),
-                 ([100,100,80], [100,80])
+                 ([100,100,80], [100,80]),
                  ([100,100,80], [100,100,80]),
                  ([200,160], [200,160]),
                  ([200,200,160], [200,160])]
 n_conv_layers_list = [0,3]
 
-activation_branch = torch.nn.ReLU()
+activation_branch = torch.nn.Sigmoid()
 activation_trunk = torch.nn.Sigmoid()
 
 # weights for physics and data loss: loss = w_ph*loss_ph + w_d*loss_d
