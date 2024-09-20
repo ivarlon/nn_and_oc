@@ -155,7 +155,7 @@ def train_DON(model,
                 loss_data = loss_fn_data(preds, y_batch, u_x, x_batch)
                 loss_physics = loss_fn_physics(preds, y_batch, u_x, x_batch)
                 loss = loss_data + loss_physics
-                loss.backward(retain_graph=True)
+                loss.backward()#retain_graph=True)
                 
                 optimizer.step()
                 
