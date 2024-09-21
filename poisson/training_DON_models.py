@@ -2,9 +2,6 @@
 """
 Trains Deep Operator Networks (DeepONets) to solve Poisson equation
 
-The control/source is transformed before being input into the network:
-    u -> u + u_shift -> log(u + u_shift)
-This reduces the magnitude of u including the variance, and allows for better training.
 """
 
 # for saving data
@@ -45,7 +42,7 @@ if not os.path.exists(data_dir):
         os.makedirs(data_dir)
 
 
-N = 64 # number of points along each direction
+N = 40 # number of points along each direction
 
 # size of domain
 L = 1.
@@ -66,7 +63,7 @@ batch_size_fun = 50 # minibatch size during SGD
 batch_size_loc = N**2 # no. of minibatch domain points. Get worse performance when not using entire domain :/
 
 u_max = 80. # maximum amplitude of control
-u_shift = 100. # we input the log of control to NN, : u + u_shift > -u_max + u_shift > 0
+
 generate_data_func = lambda n_samples: generate_data(N,
                   L,
                   BCs=[bc.numpy() for bc in BCs],
@@ -93,12 +90,12 @@ else:
 test_data = generate_data_func(n_test-200)
 augment_data(test_data, n_augmented_samples=200, n_combinations=5, max_coeff=2)
 test_data["r"].requires_grad = True
-u_test = (test_data["u"] + u_shift).log(); r_test = test_data["r"]; y_test = test_data["y"]
+u_test = test_data["u"]; r_test = test_data["r"]; y_test = test_data["y"]
 
 val_data = generate_data_func(n_val-200)
 augment_data(val_data, n_augmented_samples=200, n_combinations=5, max_coeff=2)
 val_data["r"].requires_grad = True
-dataset_val = ((val_data["u"] + u_shift).log().to(device), val_data["r"].to(device), val_data["y"].to(device))
+dataset_val = (val_data["u"].to(device), val_data["r"].to(device), val_data["y"].to(device))
 
 ################
 # physics loss #
@@ -117,9 +114,9 @@ def PDE_interior(u,x,y):
     dy_xx = dy_xx.view(y.shape[0], N, N)
     dy_yy = dy_yy.view(y.shape[0], N, N)
     
-    laplacian_transformed = torch.log(-(dy_xx + dy_yy) + u_shift) # transform laplacian in same way as control u
+    laplacian = dy_xx + dy_yy
     
-    return laplacian_transformed[:,1:-1,1:-1] - u.view_as(dy_xx)[:,1:-1,1:-1]
+    return laplacian[:,1:-1,1:-1] - u.view_as(dy_xx)[:,1:-1,1:-1]
 
 def physics_loss(u, x, y, BCs, weight_BC=1.):
     # y = y(x;u) is output of DeepONet, tensor of shape (n_samples, n_domain_points, dim(Y))
@@ -208,7 +205,7 @@ for n_conv_layers in n_conv_layers_list:
                 m += 1
                 print("Training model", str(m) + "/" + str(n_models))
                 data = train_data[m-1]
-                u_train = (data["u"] + u_shift).log()
+                u_train = data["u"]
                 y_train = data["y"]
                 r_train = data["r"]
                 dataset = DeepONetDataset(u_train, r_train, y_train)

@@ -1,10 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-Trains Deep Operator Networks (DeepONets) to solve Poisson equation
+Trains Fourier neural operators (FNOs) to solve Poisson equation
 
-The control/source is transformed before being input into the network:
-    u -> u + u_shift -> log(u + u_shift)
-This reduces the magnitude of u including the variance, and allows for better training.
 """
 
 # for saving data
@@ -66,7 +63,7 @@ n_val = 400 # no. of training samples
 batch_size = 50 # minibatch size during SGD
 
 u_max = 80. # maximum amplitude of control
-u_shift = 100. # we input the log of control to NN, : u + u_shift > -u_max + u_shift > 0
+
 generate_data_func = lambda n_samples: generate_data(N,
                   L,
                   BCs=[bc.numpy() for bc in BCs],
@@ -95,11 +92,11 @@ else:
 # generate test and validation data
 test_data = generate_data_func(n_test-200)
 augment_data(test_data, n_augmented_samples=200, n_combinations=5, max_coeff=2)
-u_test = flatten_tensors((test_data["u"] + u_shift).log()); y_test = flatten_tensors(test_data["y"])
+u_test = flatten_tensors(test_data["u"]); y_test = flatten_tensors(test_data["y"])
 
 val_data = generate_data_func(n_val-200)
 augment_data(val_data, n_augmented_samples=200, n_combinations=5, max_coeff=2)
-dataset_val = (flatten_tensors((val_data["u"] + u_shift).log()).to(device), flatten_tensors(val_data["y"]).to(device))
+dataset_val = (flatten_tensors(val_data["u"]).to(device), flatten_tensors(val_data["y"]).to(device))
 
 #######################################
 # Set up and train the various models #
@@ -146,7 +143,7 @@ for weight_penalty in weight_penalties:
                 m += 1
                 print("Training model", str(m) + "/" + str(n_models))
                 data = train_data[m-1]
-                u_train = flatten_tensors((data["u"] + u_shift).log())
+                u_train = flatten_tensors(data["u"])
                 y_train = flatten_tensors(data["y"])
                 dataset = BasicDataset(u_train, y_train)
                 dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
