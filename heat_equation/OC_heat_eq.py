@@ -40,10 +40,10 @@ delta_x = L/(N_x-1)
 
 tt, xx = np.meshgrid(t,x, indexing='ij')
 
-nu = 1e-7 # penalty on control u
+nu = 5e-3 # penalty on control u
 
 # desired state for OC is single peak
-y_d = 0.5*np.sin(np.linspace(0., np.pi, N_t)[:,None].repeat(N_x,1))**10 
+y_d = 0.5*np.sin(np.linspace(0., np.pi, N_x)[None].repeat(N_t,0))**10 
 
 # boundary conditions on state
 y_IC = 0.5*np.sin(np.linspace(0., 2*np.pi, N_x))**2 # initial condition on state is double peak with amplitude 2
@@ -175,14 +175,13 @@ class OC_problem:
         u = torch.tensor(u, dtype=torch.float32, requires_grad=True)
         
         # Calculate vJp for dNN/du^T (y-y_d)
-        calculate_state_vjp = lambda u: torch.stack([model(u) for model in self.models["state"] ]).mean(axis=0)
-        y, grad_u = torch.func.vjp(calculate_state_vjp, u)
-        y_y_d = y-torch.tensor(y_d, dtype=torch.float32).flatten().unsqueeze(-1)
-        dJdy_times_dydu = grad_u(y_y_d)[0].detach().numpy()
-        y = y.detach().numpy()
+        calculate_state_vjp = lambda model, u: model(u)
+        vjps = [torch.func.vjp(lambda u: model(u), u) for model in self.models["state"]] # -> [ (y, grad_u)_i ]
+        y_d_tensor = torch.tensor(y_d, dtype=torch.float32).flatten().unsqueeze(-1)
+        dJdy_times_dydu = np.stack([grad_u(y - y_d_tensor)[0].detach().numpy() for (y, grad_u) in vjps]).mean(axis=0)
         
-        return J_u + dJdy_times_dydu
-    
+        return J_u + dJdy_times_dydu.reshape(u_np.shape)
+        
     def DON_tangent(self, u):
         # Calculates gradient of cost as dJ = J_u + J_y dy/du
         # J_u = nu*u
@@ -193,24 +192,23 @@ class OC_problem:
         u = torch.tensor(u, dtype=torch.float32, requires_grad=True)
         
         # Calculate vJp for dNN/du^T (y-y_d)
-        calculate_state_vjp = lambda u: torch.stack([model(u,self.tx) for model in self.models["state"] ]).mean(axis=0)
-        y, grad_u = torch.func.vjp(calculate_state_vjp, u)
-        y_y_d = y-torch.tensor(y_d).flatten().unsqueeze(-1)
-        dJdy_times_dydu = grad_u(y_y_d)[0].detach().numpy()
-        y = y.detach().numpy()
+        vjps = [torch.func.vjp(lambda u: model(u, self.tx), u) for model in self.models["state"]] # -> [ (y, grad_u)_i ]
+        y_d_tensor = torch.tensor(y_d, dtype=torch.float32).flatten().unsqueeze(-1)
+        dJdy_times_dydu = np.stack([grad_u(y - y_d_tensor)[0].detach().numpy() for (y, grad_u) in vjps]).mean(axis=0)
         
         return J_u + dJdy_times_dydu
 
 if __name__=="__main__":
     model_name = "DON" # "DON" # NN model to use (if any)
     
-    method_state = "conventional"
-    method_gradient = "conventional adjoint"
+    method_state = "NN"
+    method_gradient = "NN tangent"
     
     state_filename = glob.glob('.\{}_state\models_list*.pkl'.format(model_name))[0]
     state_models = load_models(state_filename)
-    adjoint_filename = glob.glob('.\{}_adjoint\models_list*.pkl'.format(model_name))[0]
-    adjoint_models = load_models(adjoint_filename)
+    #adjoint_filename = glob.glob('.\\adjoint_experiments_{}\\models_list_2_32_0.001.pkl'.format(model_name))[0]
+    #adjoint_models = load_models(adjoint_filename)
+    adjoint_models=None
     
     problem = OC_problem(method_state, method_gradient, nu, state_models, adjoint_models, model_name)
     
@@ -220,7 +218,7 @@ if __name__=="__main__":
     #====================
         
     u0 = np.zeros_like(tt)[None] # initial guess is zero
-    max_no_iters = 10 # max. no. of optimisation iterations
+    max_no_iters = 4 # max. no. of optimisation iterations
     
     
     # time optimisation routine
@@ -231,7 +229,8 @@ if __name__=="__main__":
                                              problem.gradient_cost,
                                              u0,
                                              max_no_iters=max_no_iters,
-                                             return_full_history=True)
+                                             return_full_history=True,
+                                             print_every=2)
     
     print()
     print("Optimisation took", round(time.time() - time_start, 1), "secs")
@@ -251,24 +250,27 @@ if __name__=="__main__":
     if method_state=="NN":
         ax1 = fig.add_subplot(122)
         y_opt_actual = problem.calculate_state_conventional(u_opt).mean(axis=0)
-        rel_error = np.abs((y_opt - y_opt_actual)).mean(axis=0)#/(y_opt_actual + 1e-7))
-        contour1 = ax1.contourf(tt, xx, rel_error**0.5, levels=np.linspace((rel_error[rel_error<1e2]**0.5).min(), (rel_error[rel_error<1e2]**0.5).max()))
+        #rel_error = np.abs((y_opt - y_opt_actual)).mean(axis=0)#/(y_opt_actual + 1e-7))
+        #contour1 = ax1.contourf(tt, xx, rel_error**0.5, levels=np.linspace((rel_error[rel_error<1e2]**0.5).min(), (rel_error[rel_error<1e2]**0.5).max()))
+        contour1 = ax1.contourf(tt, xx, y_opt_actual, levels=np.linspace(y_opt_actual.min(), y_opt_actual.max()))
         fig.colorbar(contour1, ax=ax1, label="$|\\tilde{y} - y|$")
         ax1.set_xlabel("$t$"); ax1.set_ylabel("$x$")
         ax1.set_title("Difference NO prediction and numerical solution")
     fig.tight_layout() 
     plt.show()
+    
+    """
     if method_state=="NN":
-        fig, axs = plt.subplots(ncols=len(y_opt), figsize=(18,6))
+        fig, axs = plt.subplots(ncols=min(3,len(y_opt)), figsize=(18,6))
         from matplotlib.ticker import FormatStrFormatter
         contours = []
-        for i in range(len(y_opt)):
+        for i in range(min(3,len(y_opt))):
             contours.append(axs[i].contourf(tt, xx, y_opt[i], levels=np.linspace(y_opt[i].min(), y_opt[i].max())))
             cbar = fig.colorbar(contours[i], ax=axs[i])
             cbar.ax.yaxis.set_major_formatter(FormatStrFormatter('%.2f'))
         fig.tight_layout()
         plt.show()
-    
+    """
     # plot optimal control
     fig, ax = plt.subplots(figsize=(8,8))
     contour = ax.contourf(tt, xx, u_opt[0], levels=np.linspace(u_opt.min(), u_opt.max()))
