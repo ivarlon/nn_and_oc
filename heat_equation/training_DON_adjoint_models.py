@@ -58,7 +58,7 @@ x0 = 0.; xf = x0 + L
 p_TC = torch.zeros(N_x) # terminal condition on adjoint is zero
 p_BCs = (torch.zeros(N_t), torch.zeros(N_t)) # zero Dirichlet boundary conditions
 
-y_d = 0.5*torch.sin(torch.linspace(0., np.pi, N_x)[None].repeat(N_t,1))**10 # desired state for OC is single peak
+y_d = 0.5*torch.sin(torch.linspace(0., np.pi, N_x)[None].expand(N_t,N_x))**10 # desired state for OC is single peak
 
 n_models = 3
 
@@ -111,7 +111,7 @@ y_y_d_test = test_data["y-y_d"]; tx_test = test_data["tx"]; p_test = test_data["
 val_data = generate_data_func(n_val-200)
 augment_data(val_data, n_augmented_samples=200, n_combinations=5, max_coeff=2, adjoint=True)
 val_data["tx"].requires_grad = True
-dataset_val = (val_data["y-y_d"].to(device), val_data["tx"].to(device), val_data["p"].to(device))
+dataset_val = [val_data["y-y_d"].to(device), val_data["tx"].to(device), val_data["p"].to(device)]
 
 
 ################
@@ -304,13 +304,18 @@ for n_conv_layers in n_conv_layers_list:
                 
                 # calculate test losses
                 test_loss_data = torch.nn.MSELoss()(preds.view_as(p_test), p_test).item()
-                test_loss_physics = physics_loss(y_y_d_test, tx_test, preds, p_TC.to('cpu'),(p_BCs[0].to('cpu'), p_BCs[1].to('cpu')))
+                test_loss_physics = physics_loss(y_y_d_test, tx_test, preds, p_TC.to('cpu'),(p_BCs[0].to('cpu'), p_BCs[1].to('cpu'))).detach()
                 test_losses = (test_loss_data, test_loss_physics)
                 
                 metrics["test_loss"].append(test_losses)
                 metrics["R2"].append( r2 )
                 metrics["training_times"].append(training_time)
                 
+                # detach tensors to free up computational graph
+                tx_test = tx_test.detach(); tx_test.requires_grad = True 
+                dataset_val[1] = dataset_val[1].detach(); dataset_val[1].requires_grad = True
+                
+                model = model.load_state_dict(model.state_dict())
                 models_list.append(model)
                 
                 loss_histories["total"].append(loss_hist.to('cpu'))

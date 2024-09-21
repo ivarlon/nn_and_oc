@@ -112,7 +112,7 @@ u_test = test_data["u"]; tx_test = test_data["tx"]; y_test = test_data["y"]
 val_data = generate_data_func(n_val-200)
 augment_data(val_data, n_augmented_samples=200, n_combinations=5, max_coeff=2)
 val_data["tx"].requires_grad = True
-dataset_val = (val_data["u"].to(device), val_data["tx"].to(device), val_data["y"].to(device))
+dataset_val = [val_data["u"].to(device), val_data["tx"].to(device), val_data["y"].to(device)]
 
 y_IC = y_IC[::refinement_x]
 y_BCs = (y_BCs[0][::refinement_t], y_BCs[1][::refinement_t]) # Dirichlet boundary conditions on state
@@ -313,6 +313,11 @@ for n_conv_layers in n_conv_layers_list:
                 metrics["R2"].append( r2 )
                 metrics["training_times"].append(training_time)
                 
+                # detach tensors to free up computational graph
+                tx_test = tx_test.detach(); tx_test.requires_grad = True 
+                dataset_val[1] = dataset_val[1].detach(); dataset_val[1].requires_grad = True
+                
+                model = model.load_state_dict(model.state_dict())
                 models_list.append(model)
                 
                 loss_histories["total"].append(loss_hist.to('cpu'))

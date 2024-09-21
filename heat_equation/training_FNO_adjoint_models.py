@@ -59,7 +59,7 @@ x0 = 0.; xf = x0 + L
 p_TC = torch.zeros(N_x) # terminal condition on adjoint is zero
 p_BCs = (torch.zeros(N_t), torch.zeros(N_t)) # zero Dirichlet boundary conditions
 
-y_d = 0.5*torch.sin(torch.linspace(0., np.pi, N_x)[None].repeat(N_t,1))**10 # desired state for OC is single peak
+y_d = 0.5*torch.sin(torch.linspace(0., np.pi, N_x)[None].expand(N_t,N_x))**10 # desired state for OC is single peak
 
 n_models = 3 # number of models to train
 
