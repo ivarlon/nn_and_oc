@@ -175,13 +175,14 @@ class OC_problem:
         u = torch.tensor(u, dtype=torch.float32, requires_grad=True)
         
         # Calculate vJp for dNN/du^T (y-y_d)
-        calculate_state_vjp = lambda model, u: model(u)
-        vjps = [torch.func.vjp(lambda u: model(u), u) for model in self.models["state"]] # -> [ (y, grad_u)_i ]
-        y_d_tensor = torch.tensor(y_d, dtype=torch.float32).flatten().unsqueeze(-1)
-        dJdy_times_dydu = np.stack([grad_u(y - y_d_tensor)[0].detach().numpy() for (y, grad_u) in vjps]).mean(axis=0)
+        calculate_state_vjp = lambda u: torch.stack([model(u) for model in self.models["state"] ]).mean(axis=0)
+        y, grad_u = torch.func.vjp(calculate_state_vjp, u)
+        y_y_d = y-torch.tensor(y_d, dtype=torch.float32).flatten().unsqueeze(-1)
+        dJdy_times_dydu = grad_u(y_y_d)[0].detach().numpy()
+        y = y.detach().numpy()
         
-        return J_u + dJdy_times_dydu.reshape(u_np.shape)
-        
+        return J_u + dJdy_times_dydu
+    
     def DON_tangent(self, u):
         # Calculates gradient of cost as dJ = J_u + J_y dy/du
         # J_u = nu*u
@@ -192,9 +193,11 @@ class OC_problem:
         u = torch.tensor(u, dtype=torch.float32, requires_grad=True)
         
         # Calculate vJp for dNN/du^T (y-y_d)
-        vjps = [torch.func.vjp(lambda u: model(u, self.tx), u) for model in self.models["state"]] # -> [ (y, grad_u)_i ]
-        y_d_tensor = torch.tensor(y_d, dtype=torch.float32).flatten().unsqueeze(-1)
-        dJdy_times_dydu = np.stack([grad_u(y - y_d_tensor)[0].detach().numpy() for (y, grad_u) in vjps]).mean(axis=0)
+        calculate_state_vjp = lambda u: torch.stack([model(u,self.tx) for model in self.models["state"] ]).mean(axis=0)
+        y, grad_u = torch.func.vjp(calculate_state_vjp, u)
+        y_y_d = y-torch.tensor(y_d).flatten().unsqueeze(-1)
+        dJdy_times_dydu = grad_u(y_y_d)[0].detach().numpy()
+        y = y.detach().numpy()
         
         return J_u + dJdy_times_dydu
 
@@ -218,7 +221,7 @@ if __name__=="__main__":
     #====================
         
     u0 = np.zeros_like(tt)[None] # initial guess is zero
-    max_no_iters = 4 # max. no. of optimisation iterations
+    max_no_iters = 10 # max. no. of optimisation iterations
     
     
     # time optimisation routine
