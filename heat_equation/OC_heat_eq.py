@@ -12,6 +12,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 import torch
 
+from torch.func import stack_module_state, functional_call, vmap # to vectorise ensemble
+import copy
+
+plt.style.use("ggplot")
+
 import glob
 import pickle
 
@@ -70,9 +75,7 @@ class OC_problem:
         # penalty on control
         self.nu = nu
         
-        # create dictionary to hold models
-        self.models = dict(state = state_models,
-                           adjoint = adjoint_models)
+        self.initialise_ensemble(state_models, adjoint_models)
         
         # state methods
         if method_state == "conventional":
@@ -124,20 +127,39 @@ class OC_problem:
         y = self.calculate_state(u).mean(axis=0)[None]
         return self.cost(y, u)
     
+    def initialise_ensemble(self, state_models, adjoint_models):
+        
+        if state_models is not None:
+            self.state_params, self.state_buffers = stack_module_state(state_models)
+            self.base_model_state = copy.deepcopy(state_models[0]).to("meta") # make a "meta" version of models
+        
+        if adjoint_models is not None:
+            self.adjoint_params, self.adjoint_buffers = stack_module_state(adjoint_models)
+            self.base_model_adjoint = copy.deepcopy(adjoint_models[0]).to("meta") # make a "meta" version of models
+    
+    ###########################################
+    # methods to calculate state and gradient #
+    ###########################################
     def calculate_state_conventional(self, u):
         # uses Crank-Nicolson
         return solve_state_eq(u, y_IC, y_BCs, diffusion_coeff, t_span=(0.,T), x_span=(0.,L))
     
     def calculate_state_FNO(self, u):
         # calculate ensemble predictions
-        y = torch.cat([model(torch.tensor(u, dtype=torch.float32).unsqueeze(-1)) for model in self.models["state"] ])
+        def state_ensemble(params, buffers, u):
+            return functional_call( self.base_model_state, (params, buffers), (u,))
+        
+        y = vmap(state_ensemble, in_dims=(0, 0, None))(self.state_params, self.state_buffers, torch.tensor(u, dtype=torch.float32).unsqueeze(-1))
         y = y.view(len(y),N_t,N_x)
         y = y.detach().numpy()
         return y
     
     def calculate_state_DON(self, u):
         # calculate ensemble predictions
-        y = torch.cat([model(torch.tensor(u, dtype=torch.float32), self.tx) for model in self.models["state"] ])
+        def state_ensemble(params, buffers, u):
+            return functional_call( self.base_model_state, (params, buffers), (u, self.tx))
+        
+        y = vmap(state_ensemble, in_dims=(0, 0, None))(self.state_params, self.state_buffers, torch.tensor(u, dtype=torch.float32))
         y = y.view(len(y),N_t,N_x)
         y = y.detach().numpy()
         return y
@@ -148,15 +170,22 @@ class OC_problem:
     def calculate_adjoint_FNO(self, y):
         y_y_d = torch.tensor(y-y_d, dtype=torch.float32).unsqueeze(-1)
         # calculate ensemble predictions
-        p = torch.cat([model(y_y_d) for model in self.models["adjoint"] ])
-        p = p.view(len(p),N_t,N_x)
+        def adjoint_ensemble(params, buffers, y):
+            return functional_call( self.base_model_adjoint, (params, buffers), (y,))
+        
+        p = vmap(adjoint_ensemble, in_dims=(0, 0, None))(self.adjoint_params, self.adjoint_buffers, y_y_d)
+        p = p.view(len(p)*len(y_y_d),N_t,N_x)
         p = p.detach().numpy()
         return p
     
     def calculate_adjoint_DON(self, y):
         y_y_d = torch.tensor(y-y_d, dtype=torch.float32)
         # calculate ensemble predictions
-        p = torch.cat([model(y_y_d, self.tx) for model in self.models["adjoint"] ])
+        def adjoint_ensemble(params, buffers, y):
+            return functional_call( self.base_model_adjoint, (params, buffers), (y, self.tx))
+        #p = torch.cat([model(y_y_d, self.tx) for model in self.models["adjoint"] ])
+        
+        p = vmap(adjoint_ensemble, in_dims=(0, 0, None))(self.adjoint_params, self.adjoint_buffers, y_y_d)
         p = p.view(len(p),N_t,N_x)
         p = p.detach().numpy()
         return p
@@ -174,13 +203,19 @@ class OC_problem:
         J_u = self.nu*u_np
         u = torch.tensor(u, dtype=torch.float32, requires_grad=True).unsqueeze(-1)
         
+        def state_ensemble(params, buffers, u):
+            return functional_call( self.base_model_state, (params, buffers), (u,))
+        
         # Calculate vJp for dNN/du^T (y-y_d)
-        calculate_state_vjp = lambda u: torch.stack([model(u) for model in self.models["state"] ]).mean(axis=0)
+        calculate_state_vjp = lambda u: vmap(state_ensemble, in_dims=(0, 0, None))(self.state_params, self.state_buffers, u).mean(axis=0)
         y, grad_u = torch.func.vjp(calculate_state_vjp, u)
         y_y_d = y-torch.tensor(y_d, dtype=torch.float32).flatten().unsqueeze(-1)
         dJdy_times_dydu = grad_u(y_y_d)[0].view(u_np.shape).detach().numpy()
         
         return J_u + dJdy_times_dydu
+    
+    
+    
     
     def DON_tangent(self, u):
         # Calculates gradient of cost as dJ = J_u + J_y dy/du
@@ -191,8 +226,11 @@ class OC_problem:
         J_u = self.nu*u_np
         u = torch.tensor(u, dtype=torch.float32, requires_grad=True)
         
+        def state_ensemble(params, buffers, u):
+            return functional_call( self.base_model_state, (params, buffers), (u, self.tx))
+        
         # Calculate vJp for dNN/du^T (y-y_d)
-        calculate_state_vjp = lambda u: torch.stack([model(u,self.tx) for model in self.models["state"] ]).mean(axis=0)
+        calculate_state_vjp = lambda u: vmap(state_ensemble, in_dims=(0, 0, None))(self.state_params, self.state_buffers, u).mean(axis=0)
         y, grad_u = torch.func.vjp(calculate_state_vjp, u)
         y_y_d = y-torch.tensor(y_d).flatten().unsqueeze(-1)
         dJdy_times_dydu = grad_u(y_y_d)[0].view(u_np.shape).detach().numpy()
@@ -200,16 +238,18 @@ class OC_problem:
         return J_u + dJdy_times_dydu
 
 if __name__=="__main__":
+    savefigs = True
+    
     model_name = "FNO" # "DON" # NN model to use (if any)
     
-    method_state = "NN"
+    method_state = "conventional"
     method_gradient = "conventional adjoint"
     
     state_filename = glob.glob('.\{}_state\models_list*.pkl'.format(model_name))[0]
     state_models = load_models(state_filename)
-    #adjoint_filename = glob.glob('.\\adjoint_experiments_{}\\models_list_2_32_0.001.pkl'.format(model_name))[0]
-    #adjoint_models = load_models(adjoint_filename)
-    adjoint_models=None
+    adjoint_filename = glob.glob('.\\adjoint_experiments_{}_10_models\\models_list*.pkl'.format(model_name))[0]
+    adjoint_models = load_models(adjoint_filename)
+    #adjoint_models=None
     
     problem = OC_problem(method_state, method_gradient, nu, state_models, adjoint_models, model_name)
     
@@ -219,14 +259,14 @@ if __name__=="__main__":
     #====================
         
     u0 = np.zeros_like(tt)[None] # initial guess is zero
-    max_no_iters = 100 # max. no. of optimisation iterations
+    max_no_iters = 40 # max. no. of optimisation iterations
     
     
     # time optimisation routine
     import time
     time_start = time.time()
     
-    u_history, cost_history, grad_history  = grad_descent(problem.reduced_cost,
+    u_history, cost_history, grad_history  = conjugate_gradient(problem.reduced_cost,
                                              problem.gradient_cost,
                                              u0,
                                              max_no_iters=max_no_iters,
@@ -240,12 +280,12 @@ if __name__=="__main__":
     
     # plot optimal state
     y_opt = problem.calculate_state(u_opt)#.mean(axis=0)
-    fig = plt.figure(figsize=(8 + 8*(method_state=="NN"),8))
+    fig = plt.figure(figsize=(6 + 6*(method_state=="NN"),4))
     ax0 = fig.add_subplot(111) if method_state=="conventional" else fig.add_subplot(121)
-    contour0 = ax0.contourf(tt, xx, y_opt.mean(axis=0), levels=np.linspace(y_opt.min(), y_opt.max()))
+    contour0 = ax0.contourf(tt, xx, y_opt.mean(axis=0), levels=np.linspace(y_opt.mean(axis=0).min(), y_opt.mean(axis=0).max()))
     fig.colorbar(contour0, ax=ax0, label="$y$")
     ax0.set_xlabel("$t$"); ax0.set_ylabel("$x$")
-    ax0.set_title("Optimal state, " + model_name*(method_state=="NN") + "conventional solver"*(method_state!="NN"))
+    ax0.set_title("Optimal state, " + model_name*(method_state=="NN") + "conventional solver"*(method_state!="NN"), fontsize="medium")
     
     
     if method_state=="NN":
@@ -256,8 +296,10 @@ if __name__=="__main__":
         contour1 = ax1.contourf(tt, xx, y_opt_actual, levels=np.linspace(y_opt_actual.min(), y_opt_actual.max()))
         fig.colorbar(contour1, ax=ax1, label="$|\\tilde{y} - y|$")
         ax1.set_xlabel("$t$"); ax1.set_ylabel("$x$")
-        ax1.set_title("Difference NO prediction and numerical solution")
+        ax1.set_title("Difference NO prediction and numerical solution", fontsize="medium")
     fig.tight_layout() 
+    if savefigs:
+        fig.savefig("Optimal_state_" + (model_name+"_")*(method_state!="conventional" and method_gradient!="conventional_adjoint") + method_state + "_" + method_gradient + ".pdf")
     plt.show()
     
     """
@@ -273,15 +315,18 @@ if __name__=="__main__":
         plt.show()
     """
     # plot optimal control
-    fig, ax = plt.subplots(figsize=(8,8))
+    fig, ax = plt.subplots(figsize=(6,4))
     contour = ax.contourf(tt, xx, u_opt[0], levels=np.linspace(u_opt.min(), u_opt.max()))
     fig.colorbar(contour, ax=ax, label="$u$")
     ax.set_xlabel("$t$"); ax.set_ylabel("$x$")
-    ax.set_title("Optimal control, " + model_name*(method_state=="NN") + "conventional solver"*(method_state!="NN"))
+    ax.set_title("Optimal control, " + model_name*(method_state=="NN") + "conventional solver"*(method_state!="NN"), fontsize="medium")
+    fig.tight_layout()
+    if savefigs:
+        fig.savefig("Optimal_control_" + (model_name+"_")*(method_state!="conventional" and method_gradient!="conventional_adjoint") + method_state + "_" + method_gradient + ".pdf")
     plt.show()
     
     # plot cost history
-    fig = plt.figure(figsize=(8,6))
+    fig = plt.figure(figsize=(5,4))
     cost_plot = plt.plot(np.arange(len(cost_history)), cost_history)[0]
     if method_state == "NN":
         cost_plot.set_label("$J(\\tilde{y}, u)$")
@@ -295,6 +340,9 @@ if __name__=="__main__":
         cost_plot.set_label("$J(y, u)$")
     plt.xlabel("Iteration"); plt.ylabel("Cost"); plt.yscale("log")
     plt.legend()
+    plt.tight_layout()
+    if savefigs:
+        fig.savefig("Cost_history_" + (model_name+"_")*(method_state!="conventional" and method_gradient!="conventional_adjoint") + method_state + "_" + method_gradient + ".pdf")
     plt.show()
     
     """

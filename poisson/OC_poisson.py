@@ -12,6 +12,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 import torch
 
+from torch.func import stack_module_state, functional_call, vmap # to vectorise ensemble
+import copy
+
 import glob
 import pickle
 
@@ -36,7 +39,7 @@ h = L/(N-1)
 
 X1, X2 = np.meshgrid(x1,x2, indexing='ij')
 
-nu = 1e-6 # penalty on control u
+nu = 1e-8 # penalty on control u
 
 # desired state for OC is single peak
 y_d = 0.25*np.sin(2*np.pi*X1)**2 * np.sin(2*np.pi*X2)**2
@@ -47,11 +50,14 @@ BCs = [np.zeros(N) for i in range(4)] # Dirichlet boundary conditions on state
 # boundary conditions on adjoint
 p_BCs = [np.zeros(N) for i in range(4)] # zero Dirichlet boundary conditions
 
-solve_state_eq = lambda u: solve_poisson(u, BCs)
+def load_models(filename):
+    with open(filename, 'rb') as infile:
+        models_list = pickle.load(infile)
+    return models_list
 
 class OC_problem:
     # This class defines functions to be used in the OC problem
-    def __init__(self, method_state, method_gradient, nu, models_filename=None, model_name=None):
+    def __init__(self, method_state, method_gradient, nu, models_list=None, model_name=None):
         """
         method_state (str) : method by which to calculate state y
                 either 'conventional' or 'NN'
@@ -61,16 +67,14 @@ class OC_problem:
         # penalty on control
         self.nu = nu
         
-        # create dictionary to hold models
-        self.models = []
+        # initialise models
+        self.initialise_ensemble(models_list)
         
         # state methods
         if method_state == "conventional":
             self.calculate_state = self.calculate_state_conventional
         
         elif method_state == "NN":
-            self.load_models(models_filename)
-            
             if model_name == "FNO":
                 self.calculate_state = self.calculate_state_FNO
             
@@ -118,19 +122,26 @@ class OC_problem:
         y = self.calculate_state(u).mean(axis=0)[None]
         return self.cost(y, u)
     
-    def load_models(self, filename):
-        with open(filename, 'rb') as infile:
-            models_list = pickle.load(infile)
-        self.models = models_list
+    def initialise_ensemble(self, models):
+        
+        if models is not None:
+            self.params, self.buffers = stack_module_state(models)
+            self.base_model = copy.deepcopy(models[0]).to("meta") # make a "meta" version of models
     
+    ###########################################
+    # methods to calculate state and gradient #
+    ###########################################
     def calculate_state_conventional(self, u):
         # solves system of equations
-        return solve_state_eq(u)
+        return solve_poisson(u, BCs)
     
     def calculate_state_FNO(self, u):
         # calculate ensemble predictions
         u = torch.tensor(u, dtype=torch.float32).unsqueeze(-1)
-        y = torch.cat([model(u) for model in self.models ])
+        def state_ensemble(params, buffers, u):
+            return functional_call( self.base_model, (params, buffers), (u,))
+        
+        y = vmap(state_ensemble, in_dims=(0, 0, None))(self.params, self.buffers, u)
         y = y.view(len(y),N,N)
         y = y.detach().numpy()
         return y
@@ -138,7 +149,10 @@ class OC_problem:
     def calculate_state_DON(self, u):
         u = torch.tensor(u, dtype=torch.float32)
         # calculate ensemble predictions
-        y = torch.cat([model(u, self.r) for model in self.models ])
+        def state_ensemble(params, buffers, u):
+            return functional_call( self.base_model, (params, buffers), (u, self.r))
+        
+        y = vmap(state_ensemble, in_dims=(0, 0, None))(self.params, self.buffers, u)
         y = y.view(len(y),N,N)
         y = y.detach().numpy()
         return y
@@ -147,20 +161,28 @@ class OC_problem:
         return solve_state_eq(y-y_d)
     
     def calculate_adjoint_FNO(self, y):
-        scale = 100.
+        scale = 10.
         y_y_d = scale*torch.tensor(y-y_d, dtype=torch.float32).unsqueeze(-1)
         # calculate ensemble predictions
-        p = torch.cat([model(y_y_d) for model in self.models ])/scale
-        p = p.view(len(p),N,N)
+        def ensemble(params, buffers, y):
+            return functional_call( self.base_model, (params, buffers), (y,))
+        
+        p = vmap(ensemble, in_dims=(0, 0, None))(self.params, self.buffers, y_y_d)
+        p = p/scale
+        p = p.view(len(p)*len(y_y_d),N,N)
         p = p.detach().numpy()
         return p
     
     def calculate_adjoint_DON(self, y):
-        scale = 100.
+        scale = 10.
         y_y_d = scale*torch.tensor(y-y_d, dtype=torch.float32)
         # calculate ensemble predictions
-        p = torch.cat([model(y_y_d, self.r) for model in self.models ])/scale
-        p = p.view(len(p),N,N)
+        def state_ensemble(params, buffers, y):
+            return functional_call( self.base_model_state, (params, buffers), (y, self.r))
+        
+        p = vmap(ensemble, in_dims=(0, 0, None))(self.params, self.buffers, y_y_d)
+        p = p/scale
+        p = p.view(len(p)*len(y_y_d),N,N)
         p = p.detach().numpy()
         return p
     
@@ -177,8 +199,11 @@ class OC_problem:
         J_u = self.nu*u_np
         u = torch.tensor(u, dtype=torch.float32, requires_grad=True).unsqueeze(-1)
         
+        def ensemble(params, buffers, u):
+            return functional_call( self.base_model, (params, buffers), (u,))
+        
         # Calculate vJp for dNN/du^T (y-y_d)
-        calculate_state_vjp = lambda u: torch.stack([model(u) for model in self.models ]).mean(axis=0)
+        calculate_state_vjp = lambda u: vmap(ensemble, in_dims=(0, 0, None))(self.params, self.buffers, u).mean(axis=0)
         y, grad_u = torch.func.vjp(calculate_state_vjp, u)
         y_y_d = y-torch.tensor(y_d, dtype=torch.float32).flatten().unsqueeze(-1)
         dJdy_times_dydu = grad_u(y_y_d)[0].view(u_np.shape).detach().numpy()
@@ -193,8 +218,11 @@ class OC_problem:
         J_u = self.nu*u_np
         u = torch.tensor(u, dtype=torch.float32, requires_grad=True)
         
+        def ensemble(params, buffers, u):
+            return functional_call( self.base_model, (params, buffers), (u, self.r))
+        
         # Calculate vJp for dNN/du^T (y-y_d)
-        calculate_state_vjp = lambda u: torch.stack([model(u,self.r) for model in self.models ]).mean(axis=0)
+        calculate_state_vjp = lambda u: vmap(ensemble, in_dims=(0, 0, None))(self.params, self.buffers, u).mean(axis=0)
         y, grad_u = torch.func.vjp(calculate_state_vjp, u)
         y_y_d = y-torch.tensor(y_d).flatten().unsqueeze(-1)
         dJdy_times_dydu = grad_u(y_y_d)[0].view(u_np.shape).detach().numpy()
@@ -207,18 +235,19 @@ if __name__=="__main__":
     method_state = "NN"
     method_gradient = "NN tangent"
     
-    state_filename = glob.glob('.\state_experiments_{}\models_list_5_16_0.001.pkl'.format(model_name))[-1]
-    #adjoint_filename = glob.glob('.\state_experiments_{}_no_log\models_list_4_16_0.001.pkl'.format(model_name))[0]
+    models_filename = glob.glob('.\state_experiments_{}\models_list_*.001.pkl'.format(model_name))[-1]
+    models_list = load_models(models_filename)
     
-    problem = OC_problem(method_state, method_gradient, nu, state_filename, model_name)
+    problem = OC_problem(method_state, method_gradient, nu, models_list, model_name)
     
     
     #====================
     # Do optimal control
     #====================
         
-    u0 = 100./(2*np.pi*0.2**2)*np.exp(-0.5*((X1-0.5)**2 + (X2-0.5)**2)/0.2**2)[None] # initial guess is zero
-    max_no_iters = 10 # max. no. of optimisation iterations
+    u0 = 1./(2*np.pi*0.2**2)*np.exp(-0.5*((X1-0.5)**2 + (X2-0.5)**2)/0.2**2)[None] # initial guess is zero
+    u0 *= 80./np.abs(u0).max()
+    max_no_iters = 20 # max. no. of optimisation iterations
     
     
     # time optimisation routine
