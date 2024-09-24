@@ -257,7 +257,7 @@ for n_conv_layers in n_conv_layers_list:
                 model.to('cpu')
                 preds = model(y_y_d_test, tx_test)
                 
-                r2 = 1. - torch.mean(((preds.flatten(start_dim=1)-p_test.flatten(start_dim=1))**2).mean(axis=1)/p_test.flatten(start_dim=1).var(axis=1))
+                r2 = 1. - torch.mean(((preds.flatten(start_dim=1)-p_test.flatten(start_dim=1))**2).mean(axis=1)/p_test.flatten(start_dim=1).var(axis=1)).detach()
                 if retrain_if_low_r2:
                     if r2 < desired_r2:
                         print("R2 = {:.2f} < {:.2f}, retraining for {:g} epochs.".format(r2, desired_r2, iterations))
@@ -287,7 +287,7 @@ for n_conv_layers in n_conv_layers_list:
                         model.to("cpu")
                         preds = model(y_y_d_test, tx_test)
                         
-                        r2 = 1. - torch.mean(((preds.flatten(start_dim=1)-p_test.flatten(start_dim=1))**2).mean(axis=1)/p_test.flatten(start_dim=1).var(axis=1))
+                        r2 = 1. - torch.mean(((preds.flatten(start_dim=1)-p_test.flatten(start_dim=1))**2).mean(axis=1)/p_test.flatten(start_dim=1).var(axis=1)).detach()
                         if r2 < desired_r2:
                             # abandon current model and reinitialise
                             if n_retrains >= max_n_retrains:
@@ -315,7 +315,7 @@ for n_conv_layers in n_conv_layers_list:
                 tx_test = tx_test.detach(); tx_test.requires_grad = True 
                 dataset_val[1] = dataset_val[1].detach(); dataset_val[1].requires_grad = True
                 
-                model = model.load_state_dict(model.state_dict())
+                #model = model.load_state_dict(model.state_dict())
                 models_list.append(model)
                 
                 loss_histories["total"].append(loss_hist.to('cpu'))

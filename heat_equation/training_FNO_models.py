@@ -15,7 +15,7 @@ from torch.utils.data import DataLoader
 
 # import custom libraries and functions
 from FNO import FNO
-from training_routines import train_FNO
+from utils.training_routines import train_FNO
 from CustomDataset import *
 from generate_data_heat_eq import generate_data, augment_data
 
@@ -43,8 +43,8 @@ if not os.path.exists(data_dir):
 
 diffusion_coeff = 1e-1 # coefficient multiplying curvature term y_xx
 
-N_t = 64 # number of time points t_i
-N_x = 32 # number of spatial points x_j
+N_t = 16 # number of time points t_i
+N_x = 8 # number of spatial points x_j
 
 # time span
 T = 1.
@@ -58,14 +58,14 @@ x0 = 0.; xf = x0 + L
 y_IC = 0.5*torch.sin(torch.linspace(0., 2*np.pi, N_x))**2 # initial condition on state is double peak with amplitude 2
 y_BCs = (torch.zeros(N_t), torch.zeros(N_t)) # Dirichlet boundary conditions on state
 
-n_models = 3 # number of models to train
+n_models = 5 # number of models to train
 
 
 ################################
 # Generate train and test data #
 ################################
 
-n_train = 5000 # no. of training samples
+n_train = 500 # no. of training samples
 n_test = 500 # no. of test samples
 n_val = 400
 batch_size = 50 # minibatch size during SGD
@@ -90,17 +90,17 @@ flatten_tensors = lambda tens: tens.flatten(start_dim=1).unsqueeze(-1)
 reshape_tensors = lambda tens: tens[...,0].view(tens.shape[0], N_t, N_x)
 
 # generate different training data for different models?
-different_data = True
+different_data = False
 if different_data:
     train_data = []
     for m in range(n_models):
-        data = generate_data_func(n_train-2000)
-        augment_data(data, n_augmented_samples=2000, n_combinations=5, max_coeff=2)
+        data = generate_data_func(n_train-200)
+        augment_data(data, n_augmented_samples=200, n_combinations=5, max_coeff=2)
         train_data.append(data)
 else:
     # use the same training data for all models
-    data = data = generate_data_func(n_train-2000)
-    augment_data(data, n_augmented_samples=2000, n_combinations=5, max_coeff=2)
+    data = data = generate_data_func(n_train-200)
+    augment_data(data, n_augmented_samples=200, n_combinations=5, max_coeff=2)
     train_data = n_models*[data]
 
 # generate test and validation data
@@ -119,13 +119,13 @@ dataset_val = (flatten_tensors(val_data["u"]).to(device), flatten_tensors(val_da
 
 d_u = 1 # dimension of input u(x_i): u is an Nxd_u array
 architectures = torch.cartesian_prod(torch.arange(2,5), torch.tensor([2,4,8,16,32])) # pairs of (n_layers, d_v)
-
+architectures = torch.tensor([ [3,8] ])
 loss_fn = torch.nn.MSELoss()
 
 weight_penalties = [0]#, 1e-2, 1e-3]
-learning_rates = [1e-3] # learning rate
+learning_rates = [1e-2] # learning rate
 
-iterations = 3000 # no. of training epochs
+iterations = 300 # no. of training epochs
 
 """
 Train the models
@@ -160,7 +160,7 @@ for weight_penalty in weight_penalties:
                 data = train_data[m-1]
                 u_train = flatten_tensors(data["u"])
                 y_train = flatten_tensors(data["y"])
-                dataset = BasicDataset(u_train, y_train, device=device)
+                dataset = BasicDataset(u_train, y_train)
                 dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
                 model = FNO(n_layers, N_t*N_x, d_u, d_v)
                 model.to(device)
@@ -231,7 +231,7 @@ for weight_penalty in weight_penalties:
                 loss_histories["validation"].append(loss_hist_val.to('cpu'))
                 
                 print()
-                
+            assert False    
             # save training_loss
             filename_loss_history = "loss_history_" + model_params + "_" + str(lr) + ".pkl"
             with open(os.path.join(data_dir, filename_loss_history), "wb") as outfile:
