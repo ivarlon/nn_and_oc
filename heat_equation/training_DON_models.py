@@ -57,16 +57,16 @@ L = 2.
 x0 = 0.; xf = x0 + L
 
 # boundary conditions
-y_IC = 0.5*torch.sin(torch.linspace(0., 2*np.pi, refinement_x*(N_x-1)+1))**2 # initial condition on state is double peak with amplitude 2
-y_BCs = (torch.zeros(refinement_t*(N_t-1) + 1), torch.zeros(refinement_t*(N_t-1)+1)) # Dirichlet boundary conditions on state
+y_IC = 0.5*(torch.sin(torch.linspace(0., 3*np.pi, refinement_x*(N_x-1)+1)) + 2.)# initial condition on state is double peak and one trough
+y_BCs = (torch.ones(refinement_t*(N_t-1) + 1), torch.ones(refinement_t*(N_t-1)+1)) # Dirichlet boundary conditions on state
 
-n_models = 3
+n_models = 10
 
 ################################
 # Generate train and test data #
 ################################
 
-n_train = 5000 # no. of training samples
+n_train = 7500 # no. of training samples
 n_test = 500 # no. of test samples
 n_val = 400 # no. of training samples
 batch_size_fun = 50 # minibatch size during SGD
@@ -92,14 +92,14 @@ different_data = True
 if different_data:
     train_data = []
     for m in range(n_models):
-        data = generate_data_func(n_train-2000)
-        augment_data(data, n_augmented_samples=2000, n_combinations=5, max_coeff=2)
+        data = generate_data_func(n_train-3000)
+        augment_data(data, n_augmented_samples=3000, n_combinations=5, max_coeff=2)
         data["tx"].requires_grad = True
         train_data.append(data)
 else:
     # use the same training data for all models
-    data = generate_data_func(n_train-2000)
-    augment_data(data, n_augmented_samples=2000, n_combinations=5, max_coeff=2)
+    data = generate_data_func(n_train-3000)
+    augment_data(data, n_augmented_samples=3000, n_combinations=5, max_coeff=2)
     data["tx"].requires_grad = True
     train_data = n_models*[data]
 
@@ -161,8 +161,8 @@ architectures = [([100,40], [100,40]),
                  ([100,100,40], [100,40]),
                  ([100,40], [100,100,40]),
                  ([200,100], [200,100]),
-                 ([200,200,100], [200,100]  ) ][cuda:cuda+1]
-n_conv_layers_list = [0,3]
+                 ([200,200,100], [200,100]  ) ][3:3+1]
+n_conv_layers_list = [0,3][1:]
 
 activation_branch = torch.nn.Sigmoid()
 activation_trunk = torch.nn.Sigmoid()
@@ -191,8 +191,8 @@ iterations = 3000 # no. of training epochs
 """
 Train the various models
 """
-retrain_if_low_r2 = False # retrain model one additional time if R2 on test set is below desired score. The model is discarded and a new one initialised if the retrain still yields R2<0.95.
-max_n_retrains = 20 # max. no. of retrains (to avoid potential infinite retrain loop)
+retrain_if_low_r2 = True # retrain model one additional time if R2 on test set is below desired score. The model is discarded and a new one initialised if the retrain still yields R2<0.95.
+max_n_retrains = 5 # max. no. of retrains (to avoid potential infinite retrain loop)
 desired_r2 = 0.95
 
 for n_conv_layers in n_conv_layers_list:

@@ -33,7 +33,7 @@ else:
     device = torch.device("cpu")
 
 # create data directory to store models and results
-data_dir_name = 'adjoint_experiments_DON'
+data_dir_name = 'adjoint_experiments_DON_newhyperparams'
 problem_dir_name = "heat_equation"
 script_dir = os.path.dirname(os.path.abspath(__file__))
 data_dir = os.path.join(script_dir, problem_dir_name, data_dir_name)
@@ -58,15 +58,15 @@ x0 = 0.; xf = x0 + L
 p_TC = torch.zeros(N_x) # terminal condition on adjoint is zero
 p_BCs = (torch.zeros(N_t), torch.zeros(N_t)) # zero Dirichlet boundary conditions
 
-y_d = 0.5*torch.sin(torch.linspace(0., np.pi, N_x)[None].expand(N_t,N_x))**10 # desired state for OC is single peak
+y_d = 0.5*(torch.sin(torch.linspace(0., np.pi, N_x)[None].expand(N_t,N_x))**9 + 2.) -1. # desired state for OC is single peak (subtract BC for state y(t,{0,L})=1 to get zero on boundary)
 
-n_models = 3
+n_models = 1
 
 ################################
 # Generate train and test data #
 ################################
 
-n_train = 5000 # no. of training samples
+n_train = 500 # no. of training samples
 n_test = 500 # no. of test samples
 n_val = 400 # no. of training samples
 batch_size_fun = 50 # minibatch size during SGD
@@ -91,8 +91,8 @@ different_data = True
 if different_data:
     train_data = []
     for m in range(n_models):
-        data = generate_data_func(n_train-2000)
-        augment_data(data, n_augmented_samples=2000, n_combinations=5, max_coeff=2, adjoint=True)
+        data = generate_data_func(n_train-200)
+        augment_data(data, n_augmented_samples=200, n_combinations=5, max_coeff=2, adjoint=True)
         data["tx"].requires_grad = True
         train_data.append(data)
 else:
@@ -155,14 +155,12 @@ input_size_branch = (N_t, N_x)
 input_size_trunk = 2
 
 
-architectures = [([100,40], [100,40]),
-                 ([100,100,40], [100,40]),
-                 ([100,40], [100,100,40]),
+architectures = [([100,40], [100,100,40]),
                  ([200,100], [200,100]),
-                 ([200,200,100], [200,100]  ) ][cuda:cuda+1]
-n_conv_layers_list = [0,3][1:]
+                 ([200,200,100], [200,100]  ) ][:-1]
+n_conv_layers_list = [0,3][:]
 
-activation_branch = torch.nn.ReLU()
+activation_branch = torch.nn.Sigmoid()
 activation_trunk = torch.nn.Sigmoid()
 
 # weights for physics and data loss: loss = w_ph*loss_ph + w_d*loss_d
@@ -189,8 +187,8 @@ iterations = 3000 # no. of training epochs
 """
 Train the various models
 """
-retrain_if_low_r2 = False # retrain model one additional time if R2 on test set is below desired score. The model is discarded and a new one initialised if the retrain still yields R2<0.95.
-max_n_retrains = 20 # max. no. of retrains (to avoid potential infinite retrain loop)
+retrain_if_low_r2 = True # retrain model one additional time if R2 on test set is below desired score. The model is discarded and a new one initialised if the retrain still yields R2<0.95.
+max_n_retrains = 5 # max. no. of retrains (to avoid potential infinite retrain loop)
 desired_r2 = 0.99
 
 for n_conv_layers in n_conv_layers_list:
@@ -315,7 +313,6 @@ for n_conv_layers in n_conv_layers_list:
                 tx_test = tx_test.detach(); tx_test.requires_grad = True 
                 dataset_val[1] = dataset_val[1].detach(); dataset_val[1].requires_grad = True
                 
-                #model = model.load_state_dict(model.state_dict())
                 models_list.append(model)
                 
                 loss_histories["total"].append(loss_hist.to('cpu'))

@@ -165,7 +165,7 @@ for weight_penalty in weight_penalties:
                 model.to('cpu')
                 preds = model(u_test)
                 
-                r2 = 1. - torch.mean(((preds.flatten(start_dim=1)-y_test.flatten(start_dim=1))**2).mean(axis=1)/y_test.flatten(start_dim=1).var(axis=1))
+                r2 = 1. - torch.mean(((preds.flatten(start_dim=1)-y_test.flatten(start_dim=1))**2).mean(axis=1)/y_test.flatten(start_dim=1).var(axis=1)).detach()
                 if retrain_if_low_r2:
                     if r2 < desired_r2:
                         print("R2 = {:.2f} < {:.2f}, retraining for {:g} epochs.".format(r2, desired_r2, iterations))
@@ -189,7 +189,7 @@ for weight_penalty in weight_penalties:
                         model.to('cpu')
                         preds = model(u_test)
                         
-                        r2 = 1. - torch.mean(((preds.flatten(start_dim=1)-y_test.flatten(start_dim=1))**2).mean(axis=1)/y_test.flatten(start_dim=1).var(axis=1))
+                        r2 = 1. - torch.mean(((preds.flatten(start_dim=1)-y_test.flatten(start_dim=1))**2).mean(axis=1)/y_test.flatten(start_dim=1).var(axis=1)).detach()
                         if r2 < desired_r2:
                             # abandon current model and reinitialise
                             if n_retrains >= max_n_retrains:

@@ -10,12 +10,14 @@ opt. conditions:
 """
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.ticker as tkr
+plt.style.use("ggplot")
+
 import torch
 
 from torch.func import stack_module_state, functional_call, vmap # to vectorise ensemble
 import copy
 
-plt.style.use("ggplot")
 
 import glob
 import pickle
@@ -48,11 +50,14 @@ tt, xx = np.meshgrid(t,x, indexing='ij')
 nu = 1e-3 # penalty on control u
 
 # desired state for OC is single peak
-y_d = 0.5*np.sin(np.linspace(0., np.pi, N_x)[None].repeat(N_t,0))**10 
+#y_d = 0.5*np.sin(np.linspace(0., np.pi, N_x)[None].repeat(N_t,0))**10 
+y_d = 0.5*(np.sin(np.linspace(0., np.pi, N_x)[None].repeat(N_t,0))**9 + 2.)
 
 # boundary conditions on state
-y_IC = 0.5*np.sin(np.linspace(0., 2*np.pi, N_x))**2 # initial condition on state is double peak with amplitude 2
-y_BCs = (np.zeros(N_t), np.zeros(N_t)) # Dirichlet boundary conditions on state
+#y_IC = 0.5*np.sin(np.linspace(0,2*np.pi,N_x))**2#0.5*(np.sin(np.linspace(0., 3*np.pi, N_x)) + 2.) # initial condition on state is double peak with amplitude 2
+y_IC = 0.5*(np.sin(np.linspace(0,3*np.pi,N_x)) + 2.)#0.5*(np.sin(np.linspace(0., 3*np.pi, N_x)) + 2.) # initial condition on state is double peak with amplitude 2
+#y_BCs = (np.zeros(N_t), np.zeros(N_t)) # Dirichlet boundary conditions on state
+y_BCs = (np.ones(N_t), np.ones(N_t)) # Dirichlet boundary conditions on state
 
 # boundary conditions on adjoint
 p_TC = np.zeros(N_x) # terminal condition on adjoint is zero
@@ -62,6 +67,21 @@ def load_models(filename):
     with open(filename, 'rb') as infile:
         models_list = pickle.load(infile)
     return models_list
+
+def get_R2_of_prediction_history(u_history, model_ensemble, numerical_solver):
+    ensemble_pred_R2 = []
+    mean_R2 = [] # mean R2 of intra-ensemble preds
+    std_R2 = [] # std.dev. of R2 of intra-ensemble preds
+    for i in range(len(u_history)):
+        u = u_history[i]
+        preds = model_ensemble(u)
+        target = numerical_solver(u)
+        ensemble_pred_R2.append(1. - np.mean( (preds.mean(axis=0) - target[0])**2, axis=(-2,-1))/target.var())
+        mean_R2.append(1. - np.mean( np.mean( (preds - target)**2, axis=(-2,-1))/target.var() ) )
+        std_R2.append(np.std(1. - np.mean( (preds - target)**2, axis=(-2,-1))/target.var() ) )
+    return np.array(ensemble_pred_R2), np.array(mean_R2), np.array(std_R2)
+        
+        
 
 class OC_problem:
     # This class defines functions to be used in the OC problem
@@ -121,7 +141,7 @@ class OC_problem:
 
     def cost(self, y, u):
         # cost function to be minimised
-        return 0.5*delta_x*delta_t*np.sum((y-y_d)**2) + 0.5*self.nu*delta_x*delta_t*np.sum(u**2)
+        return 0.5*delta_x*delta_t*np.sum((np.mean(y, axis=0) -y_d)**2) + 0.5*self.nu*delta_x*delta_t*np.sum(u**2)
     
     def reduced_cost(self, u):
         y = self.calculate_state(u).mean(axis=0)[None]
@@ -186,7 +206,7 @@ class OC_problem:
         #p = torch.cat([model(y_y_d, self.tx) for model in self.models["adjoint"] ])
         
         p = vmap(adjoint_ensemble, in_dims=(0, 0, None))(self.adjoint_params, self.adjoint_buffers, y_y_d)
-        p = p.view(len(p),N_t,N_x)
+        p = p.view(len(p)*len(y_y_d),N_t,N_x)
         p = p.detach().numpy()
         return p
     
@@ -238,17 +258,22 @@ class OC_problem:
         return J_u + dJdy_times_dydu
 
 if __name__=="__main__":
-    savefigs = True
-    
+    savefigs = False
+    figsize = (3.5,3)
+    fontsize = 14
     model_name = "FNO" # "DON" # NN model to use (if any)
     
     method_state = "conventional"
     method_gradient = "conventional adjoint"
     
-    state_filename = glob.glob('.\{}_state\models_list*.pkl'.format(model_name))[0]
-    state_models = load_models(state_filename)
-    adjoint_filename = glob.glob('.\\adjoint_experiments_{}_10_models\\models_list*.pkl'.format(model_name))[0]
-    adjoint_models = load_models(adjoint_filename)
+    #state_filename = glob.glob('.\FNO_state\models_list*.pkl')[-1]
+    state_filename = glob.glob('.\state_experiments_{}_15_models\models_list*.pkl'.format(model_name))[-1]
+    #state_filename = glob.glob('.\{}_state\models_list*.pkl'.format(model_name))[-1]
+    state_models = load_models(state_filename)[:10]
+    #state_models = None
+    #adjoint_filename = glob.glob('.\\deprecated\\adjoint_experiments_DON_old_yd\\models_list_*.pkl')[-1]
+    adjoint_filename = glob.glob('.\\adjoint_experiments_{}_15_models\\models_list_*.pkl'.format(model_name))[-1]
+    adjoint_models = load_models(adjoint_filename)[:10]
     #adjoint_models=None
     
     problem = OC_problem(method_state, method_gradient, nu, state_models, adjoint_models, model_name)
@@ -257,10 +282,11 @@ if __name__=="__main__":
     #====================
     # Do optimal control
     #====================
-        
-    u0 = np.zeros_like(tt)[None] # initial guess is zero
-    max_no_iters = 40 # max. no. of optimisation iterations
     
+    u0 = np.zeros_like(tt)[None] # initial guess is zero
+    u0 = -np.sin(np.linspace(0.,3*np.pi,N_x))[None]*np.exp(-tt)[None]
+    max_no_iters = 30 # max. no. of optimisation iterations
+    #assert False
     
     # time optimisation routine
     import time
@@ -280,23 +306,37 @@ if __name__=="__main__":
     
     # plot optimal state
     y_opt = problem.calculate_state(u_opt)#.mean(axis=0)
-    fig = plt.figure(figsize=(6 + 6*(method_state=="NN"),4))
-    ax0 = fig.add_subplot(111) if method_state=="conventional" else fig.add_subplot(121)
-    contour0 = ax0.contourf(tt, xx, y_opt.mean(axis=0), levels=np.linspace(y_opt.mean(axis=0).min(), y_opt.mean(axis=0).max()))
-    fig.colorbar(contour0, ax=ax0, label="$y$")
-    ax0.set_xlabel("$t$"); ax0.set_ylabel("$x$")
-    ax0.set_title("Optimal state, " + model_name*(method_state=="NN") + "conventional solver"*(method_state!="NN"), fontsize="medium")
-    
+    #fig = plt.figure(figsize=(6 + 4*(method_state=="NN"),4))
+    fig = plt.figure(figsize=(figsize[0]*2,figsize[1]))
+    ax0 = fig.add_subplot(121)# if method_state=="conventional" else fig.add_subplot(121)
+    contour0 = ax0.contourf(tt, xx, y_opt.mean(axis=0), levels=np.linspace(y_opt.mean(axis=0).min(), y_opt.mean(axis=0).max(), 100))
+    cb0 = fig.colorbar(contour0, ax=ax0, format=tkr.FormatStrFormatter('%.2g'))
+    cb0.set_label("$y$")
+    ax0.set(xlabel="$t$", ylabel="$x$", yticks=[0.,L/4, L/2,3*L/4, L])
     
     if method_state=="NN":
+        ax0.set_title("Optimal state, " + model_name  + " " + method_gradient.split(" ")[-1], fontsize=fontsize)
+        
         ax1 = fig.add_subplot(122)
         y_opt_actual = problem.calculate_state_conventional(u_opt).mean(axis=0)
         #rel_error = np.abs((y_opt - y_opt_actual)).mean(axis=0)#/(y_opt_actual + 1e-7))
         #contour1 = ax1.contourf(tt, xx, rel_error**0.5, levels=np.linspace((rel_error[rel_error<1e2]**0.5).min(), (rel_error[rel_error<1e2]**0.5).max()))
-        contour1 = ax1.contourf(tt, xx, y_opt_actual, levels=np.linspace(y_opt_actual.min(), y_opt_actual.max()))
-        fig.colorbar(contour1, ax=ax1, label="$|\\tilde{y} - y|$")
-        ax1.set_xlabel("$t$"); ax1.set_ylabel("$x$")
-        ax1.set_title("Difference NO prediction and numerical solution", fontsize="medium")
+        contour1 = ax1.contourf(tt, xx, y_opt_actual, levels=np.linspace(y_opt_actual.min(), y_opt_actual.max(), 100))
+        cb1 = fig.colorbar(contour1, ax=ax1, format=tkr.FormatStrFormatter('%.2g'))
+        cb1.set_label("$y$")
+        ax1.set(xlabel="$t$", ylabel="$x$", yticks=[0.,L/4, L/2,3*L/4, L])
+        ax1.set_title("Numerical solution", fontsize=fontsize)
+        print("R2 of mean = ", 1. - np.mean( np.mean((y_opt.mean(axis=0) - y_opt_actual)**2)/y_opt_actual.var()) )
+        print("R2 =", 1. - np.mean( np.mean((y_opt - y_opt_actual[None])**2, axis=(1,2))/y_opt_actual.var()), "+/-", np.std(1.- np.mean((y_opt - y_opt_actual[None])**2, axis=(1,2))/y_opt_actual.var()))
+    else:
+        ax0.set_title("Optimal state")
+        
+        ax1 = fig.add_subplot(122)
+        contour1 = ax1.contourf(tt, xx, y_d, levels=np.linspace(y_opt.min(), y_d.max(), 100))
+        cb1 = fig.colorbar(contour1, ax=ax1, format=tkr.FormatStrFormatter('%.2g'))
+        cb1.set_label("$y$")
+        ax1.set(xlabel="$t$", ylabel="$x$", yticks=[0.,L/4, L/2,3*L/4, L])
+        ax1.set_title("Desired state $y_d$", fontsize=fontsize)
     fig.tight_layout() 
     if savefigs:
         fig.savefig("Optimal_state_" + (model_name+"_")*(method_state!="conventional" and method_gradient!="conventional_adjoint") + method_state + "_" + method_gradient + ".pdf")
@@ -315,18 +355,23 @@ if __name__=="__main__":
         plt.show()
     """
     # plot optimal control
-    fig, ax = plt.subplots(figsize=(6,4))
-    contour = ax.contourf(tt, xx, u_opt[0], levels=np.linspace(u_opt.min(), u_opt.max()))
+    fig, ax = plt.subplots(figsize=figsize)
+    contour = ax.contourf(tt, xx, u_opt[0], levels=np.linspace(u_opt.min(), u_opt.max(), 100))
     fig.colorbar(contour, ax=ax, label="$u$")
-    ax.set_xlabel("$t$"); ax.set_ylabel("$x$")
-    ax.set_title("Optimal control, " + model_name*(method_state=="NN") + "conventional solver"*(method_state!="NN"), fontsize="medium")
+    ax.set(xlabel="$t$", ylabel="$x$", yticks=[0.,L/4, L/2,3*L/4, L])
+    if method_gradient.split(" ")[0]=="NN":
+        ax.set_title("Optimal control, " + model_name + " " + method_gradient.split(" ")[-1], fontsize=fontsize)
+    else:
+        ax.set_title("Optimal control", fontsize=fontsize)
+    
+    fig.tight_layout()
     fig.tight_layout()
     if savefigs:
         fig.savefig("Optimal_control_" + (model_name+"_")*(method_state!="conventional" and method_gradient!="conventional_adjoint") + method_state + "_" + method_gradient + ".pdf")
     plt.show()
     
     # plot cost history
-    fig = plt.figure(figsize=(5,4))
+    fig = plt.figure(figsize=figsize)
     cost_plot = plt.plot(np.arange(len(cost_history)), cost_history)[0]
     if method_state == "NN":
         cost_plot.set_label("$J(\\tilde{y}, u)$")
@@ -339,37 +384,29 @@ if __name__=="__main__":
     else:
         cost_plot.set_label("$J(y, u)$")
     plt.xlabel("Iteration"); plt.ylabel("Cost"); plt.yscale("log")
+    if method_state=="conventional" and method_gradient=="conventional adjoint":
+        plt.title("Cost", fontsize=fontsize)
+    elif method_state=="NN" and method_gradient=="NN adjoint":
+        plt.title("Cost: {} adjoint".format(model_name), fontsize=fontsize)
+    elif method_state=="NN" and method_gradient=="NN tangent":
+        plt.title("Cost: {} tangent".format(model_name), fontsize=fontsize)
     plt.legend()
     plt.tight_layout()
     if savefigs:
         fig.savefig("Cost_history_" + (model_name+"_")*(method_state!="conventional" and method_gradient!="conventional_adjoint") + method_state + "_" + method_gradient + ".pdf")
     plt.show()
-    
-    """
-    if method_state == "NN":
-        # compare NN predicted state with numerical solution
-        plt.plot(x, solve_state_eq(u_opt).ravel(), color="red")
-    plt.plot(x, y_d.ravel())
-    plt.plot(x, u_opt.ravel(), linestyle="--")
-    
-    """
-    def taylor_test(J, u, h, J_derivative_h, rtol=1e-4):
-        # J: reduced cost function
-        # u: control, input to J
-        # h: direction in which to compute directional derivative
-        # J_derivative_h: actual directional derivative of J at u in direction h
-        n = 12
-        eps = 1e-3*np.logspace(0,-(n-1),n,base=2.)
-        
-        # compute residuals
-        residuals = np.zeros(n)
-        for i in range(n):
-            Jh = J(u + eps[i]*h)
-            residuals[i] = np.abs(Jh - J(u) - eps[i]*J_derivative_h)
-        
-        # compute convergence rates
-        convergence_rates = np.zeros(n-1)
-        for i in range(n-1):
-            convergence_rates[i] = np.log( residuals[i+1]/residuals[i] ) / np.log( eps[i+1]/eps[i] )
-        print(convergence_rates)
-        print(np.isclose(convergence_rates, 2., rtol=rtol))
+    if method_state=="NN":
+        fig = plt.figure(figsize=figsize)
+        R2_ensemble, R2_mean, R2_std = get_R2_of_prediction_history(u_history, problem.calculate_state, problem.calculate_state_conventional)
+        plt.plot(np.arange(max_no_iters + 1), R2_ensemble, label="Ensemble")
+        plt.plot(np.arange(max_no_iters + 1), R2_mean, color="black", label="Intra-ensemble")
+        plt.plot(np.arange(max_no_iters + 1), R2_mean + R2_std, color="black", linestyle="--")
+        plt.plot(np.arange(max_no_iters + 1), R2_mean - R2_std, color="black", linestyle="--")
+        plt.xlabel("Iteration"); plt.ylabel("$R^2$")
+        plt.ylim([0., 1.1])
+        plt.legend(loc="lower left")
+        plt.title("$R^2$ of {} prediction history".format(model_name), fontsize=fontsize)
+        plt.tight_layout()
+        if savefigs:
+            plt.savefig("R2_" + (model_name+"_")*(method_state!="conventional" and method_gradient!="conventional_adjoint") + method_state + "_" + method_gradient + ".pdf")
+        plt.show()

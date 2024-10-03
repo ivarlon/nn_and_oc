@@ -43,8 +43,8 @@ if not os.path.exists(data_dir):
 
 diffusion_coeff = 1e-1 # coefficient multiplying curvature term y_xx
 
-N_t = 16 # number of time points t_i
-N_x = 8 # number of spatial points x_j
+N_t = 64 # number of time points t_i
+N_x = 32 # number of spatial points x_j
 
 # time span
 T = 1.
@@ -55,17 +55,17 @@ L = 2.
 x0 = 0.; xf = x0 + L
 
 # boundary conditions
-y_IC = 0.5*torch.sin(torch.linspace(0., 2*np.pi, N_x))**2 # initial condition on state is double peak with amplitude 2
-y_BCs = (torch.zeros(N_t), torch.zeros(N_t)) # Dirichlet boundary conditions on state
+y_IC = 0.5*(torch.sin(torch.linspace(0., 3*np.pi, N_x)) + 2.) # initial condition
+y_BCs = (torch.ones(N_t), torch.ones(N_t)) # Dirichlet boundary conditions on state
 
-n_models = 5 # number of models to train
+n_models = 15 # number of models to train
 
 
 ################################
 # Generate train and test data #
 ################################
 
-n_train = 500 # no. of training samples
+n_train = 5000 # no. of training samples
 n_test = 500 # no. of test samples
 n_val = 400
 batch_size = 50 # minibatch size during SGD
@@ -90,17 +90,17 @@ flatten_tensors = lambda tens: tens.flatten(start_dim=1).unsqueeze(-1)
 reshape_tensors = lambda tens: tens[...,0].view(tens.shape[0], N_t, N_x)
 
 # generate different training data for different models?
-different_data = False
+different_data = True
 if different_data:
     train_data = []
     for m in range(n_models):
-        data = generate_data_func(n_train-200)
-        augment_data(data, n_augmented_samples=200, n_combinations=5, max_coeff=2)
+        data = generate_data_func(n_train-2000)
+        augment_data(data, n_augmented_samples=2000, n_combinations=5, max_coeff=2)
         train_data.append(data)
 else:
     # use the same training data for all models
-    data = data = generate_data_func(n_train-200)
-    augment_data(data, n_augmented_samples=200, n_combinations=5, max_coeff=2)
+    data = data = generate_data_func(n_train-2000)
+    augment_data(data, n_augmented_samples=2000, n_combinations=5, max_coeff=2)
     train_data = n_models*[data]
 
 # generate test and validation data
@@ -123,15 +123,15 @@ architectures = torch.tensor([ [3,8] ])
 loss_fn = torch.nn.MSELoss()
 
 weight_penalties = [0]#, 1e-2, 1e-3]
-learning_rates = [1e-2] # learning rate
+learning_rates = [1e-3] # learning rate
 
-iterations = 300 # no. of training epochs
+iterations = 3000 # no. of training epochs
 
 """
 Train the models
 """
-retrain_if_low_r2 = False # retrain model one additional time if R2 on test set is below desired score. The model is discarded and a new one initialised if the retrain still yields R2<0.95.
-max_n_retrains = 20 # max. no. of retrains (to avoid potential infinite retrain loop)
+retrain_if_low_r2 = True # retrain model one additional time if R2 on test set is below desired score. The model is discarded and a new one initialised if the retrain still yields R2<0.95.
+max_n_retrains = 5 # max. no. of retrains (to avoid potential infinite retrain loop)
 desired_r2 = 0.99
 
 for weight_penalty in weight_penalties:
@@ -180,7 +180,7 @@ for weight_penalty in weight_penalties:
                 model.to('cpu')
                 preds = model(u_test)
                 
-                r2 = 1. - torch.mean(((preds.flatten(start_dim=1)-y_test.flatten(start_dim=1))**2).mean(axis=1)/y_test.flatten(start_dim=1).var(axis=1))
+                r2 = 1. - torch.mean(((preds.flatten(start_dim=1)-y_test.flatten(start_dim=1))**2).mean(axis=1)/y_test.flatten(start_dim=1).var(axis=1)).detach()
                 if retrain_if_low_r2:
                     if r2 < desired_r2:
                         print("R2 = {:.2f} < {:.2f}, retraining for {:g} epochs.".format(r2, desired_r2, iterations))
@@ -204,7 +204,7 @@ for weight_penalty in weight_penalties:
                         model.to('cpu')
                         preds = model(u_test)
                         
-                        r2 = 1. - torch.mean(((preds.flatten(start_dim=1)-y_test.flatten(start_dim=1))**2).mean(axis=1)/y_test.flatten(start_dim=1).var(axis=1))
+                        r2 = 1. - torch.mean(((preds.flatten(start_dim=1)-y_test.flatten(start_dim=1))**2).mean(axis=1)/y_test.flatten(start_dim=1).var(axis=1)).detach()
                         if r2 < desired_r2:
                             # abandon current model and reinitialise
                             if n_retrains >= max_n_retrains:
@@ -231,7 +231,7 @@ for weight_penalty in weight_penalties:
                 loss_histories["validation"].append(loss_hist_val.to('cpu'))
                 
                 print()
-            assert False    
+            
             # save training_loss
             filename_loss_history = "loss_history_" + model_params + "_" + str(lr) + ".pkl"
             with open(os.path.join(data_dir, filename_loss_history), "wb") as outfile:

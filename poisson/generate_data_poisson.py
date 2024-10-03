@@ -42,7 +42,7 @@ def generate_controls(x1, x2,
         
         square_inside_exponential = torch.sum(displacements**2, axis=-1)/spreads[:,:,None,None]**2
         
-        # scale gaussians by inverse spread, not inverse spread squared, to have more similar magnitude
+        # scale gaussians by inverse spread squared
         gaussian_mix = torch.sum( torch.exp(-0.5*square_inside_exponential)*(coeffs/spreads**2)[:,:,None,None], axis=1)/(2*torch.pi)
         
         if normalize:

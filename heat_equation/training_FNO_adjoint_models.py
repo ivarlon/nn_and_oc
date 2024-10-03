@@ -59,9 +59,9 @@ x0 = 0.; xf = x0 + L
 p_TC = torch.zeros(N_x) # terminal condition on adjoint is zero
 p_BCs = (torch.zeros(N_t), torch.zeros(N_t)) # zero Dirichlet boundary conditions
 
-y_d = 0.5*torch.sin(torch.linspace(0., np.pi, N_x)[None].expand(N_t,N_x))**10 # desired state for OC is single peak
+y_d = 0.5*(torch.sin(torch.linspace(0., np.pi, N_x)[None].expand(N_t,N_x))**9 + 2.) -1. # desired state for OC is single peak (subtract BC for state y(t,{0,L})=1 to get zero on boundary)
 
-n_models = 3 # number of models to train
+n_models = 15 # number of models to train
 
 
 ################################
@@ -123,6 +123,7 @@ dataset_val = (flatten_tensors(val_data["y-y_d"]).to(device), flatten_tensors(va
 
 d_u = 1 # dimension of input y(t_i,x_j)
 architectures = torch.cartesian_prod(torch.arange(2,5), torch.tensor([4,8,16,32])) # pairs of (n_layers, d_v)
+architectures = torch.tensor([ [2, 32] ])
 
 loss_fn = torch.nn.MSELoss()
 
@@ -134,8 +135,8 @@ iterations = 3000 # no. of training epochs
 """
 Train the models
 """
-retrain_if_low_r2 = False # retrain model one additional time if R2 on test set is below desired score. The model is discarded and a new one initialised if the retrain still yields R2<0.95.
-max_n_retrains = 20 # max. no. of retrains (to avoid potential infinite retrain loop)
+retrain_if_low_r2 = True # retrain model one additional time if R2 on test set is below desired score. The model is discarded and a new one initialised if the retrain still yields R2<0.95.
+max_n_retrains = 5 # max. no. of retrains (to avoid potential infinite retrain loop)
 desired_r2 = 0.99
 
 for weight_penalty in weight_penalties:

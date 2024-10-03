@@ -16,9 +16,9 @@ model_name = "FNO" # "DON"
 problem = "state" # "adjoint"
 
 
-model_list_filenames = glob.glob('.\{}_experiments_{}\models_list_*0.001.pkl'.format(problem, model_name))
-metrics_filenames = glob.glob('.\{}_experiments_{}\metrics_*0.001.pkl'.format(problem, model_name))
-loss_history_filenames = glob.glob('.\{}_experiments_{}\loss_history_*0.001.pkl'.format(problem, model_name))
+model_list_filenames = glob.glob('.\{}_models\models_list_*.pkl'.format(model_name))
+metrics_filenames = glob.glob('.\{}_models\metrics_*.pkl'.format(model_name))
+loss_history_filenames = glob.glob('.\{}_models\loss_history_*'.format(model_name))
 
 #with open(model_list_filename, 'rb') as infile:
 #    model_list = pickle.load(infile)
@@ -33,20 +33,22 @@ for lh_filename, metrics_filename in zip(loss_history_filenames, metrics_filenam
             print(params)
             if model_name=="DON":
                 for i, (lh_d, lh_p, lh, lh_v) in enumerate(zip(lhs['data'], lhs['physics'], lhs['total'], lhs['validation'])):
-                    if i>=8:
+                    if i>=10:
                         break
                     r2 = metrics["R2"][i].item()
-                    axs[0].plot(np.arange(len(lh)), lh, linewidth=0.5, label="{:.2f}".format(r2)); axs[0].set_yscale("log"); axs[0].set_ylim([1e-4, 1e1]); axs[0].set_title("Total loss")
-                    axs[1].plot(np.arange(len(lh_v)), lh_v, linewidth=0.5); axs[1].set_yscale("log"); axs[1].set_ylim([1e-4, 1e0])
-                    axs[2].plot(np.arange(len(lh_d))[::10], lh_d[::10], linewidth=0.5, linestyle="--")
-                    axs[2].plot(np.arange(len(lh_p)), lh_p, linewidth=0.5); axs[2].set_yscale("log"); axs[2].set_ylim([1e-4, 1e0]); axs[2].set_title("Data & physics loss")
+                    axs[0].plot(np.arange(len(lh))[:], lh[:], linewidth=0.5, label="{:.2f}".format(r2)); axs[0].set_yscale("log"); axs[0].set_ylim([1e-2, 1e1]); axs[0].set_title("Total loss")
+                    axs[1].plot(np.arange(len(lh_v))[:], lh_v[:], linewidth=0.5); axs[1].set_yscale("log"); axs[1].set_ylim([1e-2, 1e1])
+                    axs[2].plot(np.arange(len(lh_d))[:], lh_d[:], linewidth=0.5, linestyle="--")
+                    axs[2].plot(np.arange(len(lh_p))[:], lh_p[:], linewidth=0.5); axs[2].set_yscale("log"); axs[2].set_ylim([1e-4, 1e0]); axs[2].set_title("Data & physics loss")
             else:
                 for i, (lh, lh_v) in enumerate(zip(lhs['train'], lhs['validation'])):
-                    if i>=8:
+                    if i>=10:
                         break
                     r2 = metrics["R2"][i].item()
                     axs[0].plot(np.arange(len(lh)), lh, linewidth=0.5, label="{:.2f}".format(r2)); axs[0].set_yscale("log"); axs[0].set_ylim([1e-5, 1e0]); axs[0].set_title("Train loss")
                     axs[1].plot(np.arange(len(lh_v)), lh_v, linewidth=0.5); axs[1].set_yscale("log"); axs[1].set_ylim([1e-5, 1e0]); axs[1].set_title("Validation loss")
             print(metrics["training_times"])
+            print(metrics["test_loss"])
+            print(metrics["R2"])
         axs[0].legend(loc="lower left")
         print()

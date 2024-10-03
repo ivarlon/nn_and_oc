@@ -2,6 +2,9 @@
 """
 Trains Deep Operator Networks (DeepONets) to solve Poisson equation
 
+The control/source is transformed before being input into the network:
+    u -> u + u_shift -> log(u + u_shift)
+This reduces the magnitude of u including the variance, and allows for better training.
 """
 
 # for saving data
@@ -13,10 +16,10 @@ import time # to measure training time
 # import numerical libraries
 import numpy as np
 import torch
-
+from torch.utils.data import DataLoader
 # import custom libraries and functions
 from DeepONet import DeepONet
-from utils.training_routines import train_DON
+from utils.training_routines_amp import train_DON
 from CustomDataset import *
 from generate_data_poisson import generate_data, augment_data
 
@@ -34,7 +37,7 @@ else:
     device = torch.device("cpu")
 
 # create data directory to store models and results
-data_dir_name = 'state_experiments_DON'
+data_dir_name = 'state_experiments_DON_10_models'
 problem_dir_name = "poisson"
 script_dir = os.path.dirname(os.path.abspath(__file__))
 data_dir = os.path.join(script_dir, problem_dir_name, data_dir_name)
@@ -50,20 +53,20 @@ L = 1.
 # boundary conditions
 BCs = [torch.zeros(N) for i in range(4)] # Dirichlet boundary conditions on state
 
-n_models = 3
+n_models = 10
 
 ################################
 # Generate train and test data #
 ################################
 
-n_train = 5000 # no. of training samples
+n_train = 7500 # no. of training samples
 n_test = 500 # no. of test samples
 n_val = 400 # no. of training samples
 batch_size_fun = 50 # minibatch size during SGD
 batch_size_loc = N**2 # no. of minibatch domain points. Get worse performance when not using entire domain :/
 
 u_max = 80. # maximum amplitude of control
-
+u_shift = 100. # we input the log of control to NN, : u + u_shift > -u_max + u_shift > 0
 generate_data_func = lambda n_samples: generate_data(N,
                   L,
                   BCs=[bc.numpy() for bc in BCs],
@@ -75,14 +78,14 @@ different_data = True
 if different_data:
     train_data = []
     for m in range(n_models):
-        data = generate_data_func(n_train-2000)
-        augment_data(data, n_augmented_samples=2000, n_combinations=5, max_coeff=2)
+        data = generate_data_func(n_train-4000)
+        augment_data(data, n_augmented_samples=4000, n_combinations=5, max_coeff=2)
         data["r"].requires_grad = True
         train_data.append(data)
 else:
     # use the same training data for all models
-    data = generate_data_func(n_train-2000)
-    augment_data(data, n_augmented_samples=2000, n_combinations=5, max_coeff=2)
+    data = generate_data_func(n_train-4000)
+    augment_data(data, n_augmented_samples=4000, n_combinations=5, max_coeff=2)
     data["r"].requires_grad = True
     train_data = n_models*[data]
 
@@ -95,7 +98,7 @@ u_test = test_data["u"]; r_test = test_data["r"]; y_test = test_data["y"]
 val_data = generate_data_func(n_val-200)
 augment_data(val_data, n_augmented_samples=200, n_combinations=5, max_coeff=2)
 val_data["r"].requires_grad = True
-dataset_val = (val_data["u"].to(device), val_data["r"].to(device), val_data["y"].to(device))
+dataset_val = [val_data["u"].to(device), val_data["r"].to(device), val_data["y"].to(device)]
 
 ################
 # physics loss #
@@ -114,9 +117,9 @@ def PDE_interior(u,x,y):
     dy_xx = dy_xx.view(y.shape[0], N, N)
     dy_yy = dy_yy.view(y.shape[0], N, N)
     
-    laplacian = dy_xx + dy_yy
+    laplacian_transformed = dy_xx+dy_yy #torch.log(-(dy_xx + dy_yy) + u_shift) # transform laplacian in same way as control u
     
-    return laplacian[:,1:-1,1:-1] - u.view_as(dy_xx)[:,1:-1,1:-1]
+    return laplacian_transformed[:,1:-1,1:-1] + u.view_as(dy_xx)[:,1:-1,1:-1]
 
 def physics_loss(u, x, y, BCs, weight_BC=1.):
     # y = y(x;u) is output of DeepONet, tensor of shape (n_samples, n_domain_points, dim(Y))
@@ -140,26 +143,27 @@ def physics_loss(u, x, y, BCs, weight_BC=1.):
 input_size_branch = (N, N)
 input_size_trunk = 2
 
-architectures = [([100,80], [100,100,80]),
-                 ([100,100,80], [100,80]),
-                 ([100,100,80], [100,100,80]),
-                 ([200,160], [200,160]),
-                 ([200,200,160], [200,160])]
-n_conv_layers_list = [0,3]
+architectures = [([100,70], [70,70,70]), ([200,140], [200,140])][1:]
+#                 ([100,100,80], [100,80]),
+#                 ([100,100,80], [100,100,80]),
+#                 ([200,160], [200,160]),
+#                 ([200,200,160], [200,160])][:-1]
+
+n_conv_layers_list = [0,3][1:]
 
 activation_branch = torch.nn.Sigmoid()
 activation_trunk = torch.nn.Sigmoid()
 
 # weights for physics and data loss: loss = w_ph*loss_ph + w_d*loss_d
-weight_physics = 0.
+weight_physics = 0.5
 weight_data = 1. - weight_physics
 
 # define loss functions (one for CPU evaluation, the other for device (cuda or CPU))
 BCs = [BCs[i].to(device) for i in range(4)]
 
 
-loss_fn_physics_CPU = lambda preds, targets, u, x: torch.tensor(0.)#weight_physics * physics_loss(u, x, preds, [BCs[i].to('cpu') for i in range(4)])
-loss_fn_physics_device = lambda preds, targets, u, x: torch.tensor(0.)#weight_physics * physics_loss(u, x, preds, BCs)
+loss_fn_physics_CPU = lambda preds, targets, u, x: weight_physics * physics_loss(u, x, preds, [BCs[i].to('cpu') for i in range(4)])
+loss_fn_physics_device = lambda preds, targets, u, x: weight_physics * physics_loss(u, x, preds, BCs)
 
 loss_fn_data = lambda preds, targets, u, x: weight_data * torch.nn.MSELoss()(preds.view_as(targets), targets)
 
@@ -172,9 +176,9 @@ iterations = 3000 # no. of training epochs
 """
 Train the various models
 """
-retrain_if_low_r2 = False # retrain model one additional time if R2 on test set is below desired score. The model is discarded and a new one initialised if the retrain still yields R2<0.95.
+retrain_if_low_r2 = True # retrain model one additional time if R2 on test set is below desired score. The model is discarded and a new one initialised if the retrain still yields R2<0.95.
 max_n_retrains = 20 # max. no. of retrains (to avoid potential infinite retrain loop)
-desired_r2 = 0.99
+desired_r2 = 0.95
 
 for n_conv_layers in n_conv_layers_list:
     print("Using", n_conv_layers, "conv layers")
@@ -209,6 +213,7 @@ for n_conv_layers in n_conv_layers_list:
                 y_train = data["y"]
                 r_train = data["r"]
                 dataset = DeepONetDataset(u_train, r_train, y_train)
+                dataloader_val = DataLoader(DeepONetDataset(*dataset_val), batch_size=n_val//10)
                 model = DeepONet(input_size_branch,
                                  input_size_trunk,
                                  branch_architecture,
@@ -223,7 +228,7 @@ for n_conv_layers in n_conv_layers_list:
                 
                 loss_hist, loss_data_hist, loss_physics_hist, loss_hist_val = train_DON(model, 
                                                                                     dataset,
-                                                                                    dataset_val,
+                                                                                    dataloader_val,
                                                                                     iterations, 
                                                                                     loss_fn_data,
                                                                                     loss_fn_physics_device,
@@ -240,7 +245,7 @@ for n_conv_layers in n_conv_layers_list:
                 model.to("cpu")
                 preds = model(u_test, r_test)
                 
-                r2 = 1. - torch.mean(((preds.flatten(start_dim=1)-y_test.flatten(start_dim=1))**2).mean(axis=1)/y_test.flatten(start_dim=1).var(axis=1))
+                r2 = 1. - torch.mean(((preds.flatten(start_dim=1)-y_test.flatten(start_dim=1))**2).mean(axis=1)/y_test.flatten(start_dim=1).var(axis=1)).detach()
                 if retrain_if_low_r2:
                     if r2 < desired_r2:
                         print("R2 = {:.2f} < {:.2f}, retraining for {:g} epochs.".format(r2, desired_r2, iterations))
@@ -249,8 +254,8 @@ for n_conv_layers in n_conv_layers_list:
                         time_start = time.time()
                         loss_hist_new, loss_data_hist_new, loss_physics_hist_new, loss_hist_val_new = train_DON(model, 
                                                                                                             dataset,
-                                                                                                            dataset_val,
-                                                                                                            iterations, 
+                                                                                                            dataloader_val,
+                                                                                                            iterations//2, 
                                                                                                             loss_fn_data,
                                                                                                             loss_fn_physics_device,
                                                                                                             batch_size_fun=batch_size_fun,
@@ -270,7 +275,7 @@ for n_conv_layers in n_conv_layers_list:
                         model.to("cpu")
                         preds = model(u_test, r_test)
                         
-                        r2 = 1. - torch.mean(((preds.flatten(start_dim=1)-y_test.flatten(start_dim=1))**2).mean(axis=1)/y_test.flatten(start_dim=1).var(axis=1))
+                        r2 = 1. - torch.mean(((preds.flatten(start_dim=1)-y_test.flatten(start_dim=1))**2).mean(axis=1)/y_test.flatten(start_dim=1).var(axis=1)).detach()
                         if r2 < desired_r2:
                             # abandon current model and reinitialise
                             if n_retrains >= max_n_retrains:
@@ -287,13 +292,16 @@ for n_conv_layers in n_conv_layers_list:
                 
                 # calculate test losses
                 test_loss_data = torch.nn.MSELoss()(preds.view_as(y_test), y_test).item()
-                test_loss_physics = physics_loss(u_test, r_test, preds, [BCs[i].to('cpu') for i in range(4)])
+                test_loss_physics = physics_loss(u_test, r_test, preds, [BCs[i].to('cpu') for i in range(4)]).detach()
                 test_losses = (test_loss_data, test_loss_physics.item())
                 
                 metrics["test_loss"].append(test_losses)
                 metrics["R2"].append( r2 )
                 metrics["training_times"].append(training_time)
-                
+                del dataloader_val
+                r_test = r_test.detach(); r_test.requires_grad = True 
+                dataset_val[1] = dataset_val[1].detach(); dataset_val[1].requires_grad = True
+                #model.load_state_dict(model.state_dict())
                 models_list.append(model)
                 
                 loss_histories["total"].append(loss_hist.to('cpu'))

@@ -216,15 +216,17 @@ class OC_problem:
         return J_u + dJdy_times_dydu
     
 if __name__ == "__main__":
-    model_name = "DON" # NN model to use (if any) = FNO or DON
+    savefigs = True
+    figsize = (3.5,3)
+    model_name = "FNO" # NN model to use (if any) = FNO or DON
     
     method_state = "NN"
-    method_gradient = "NN tangent"
+    method_gradient = "NN adjoint"
     
     state_filename = glob.glob('.\\state_experiments_{}_15_models\\models_list*.pkl'.format(model_name))[0]
-    state_models = load_models(state_filename)[:10]
+    state_models = load_models(state_filename)[:]
     adjoint_filename = glob.glob('.\\adjoint_experiments_{}_15_models\\models_list*.pkl'.format(model_name))[0]
-    adjoint_models = load_models(adjoint_filename)[:4]
+    adjoint_models = load_models(adjoint_filename)[:]
     
     problem = OC_problem(method_state, method_gradient, nu, state_models, adjoint_models, model_name)
     
@@ -234,7 +236,7 @@ if __name__ == "__main__":
     
     u0 = np.zeros(shape=(1,N,1))
     
-    max_no_iters = 30 # max. no. of optimisation iterations
+    max_no_iters = 20 # max. no. of optimisation iterations
     #assert False
     # time optimisation routine
     import time
@@ -250,31 +252,44 @@ if __name__ == "__main__":
     print()
     print("Optimisation took", round(time.time() - t0, 1), "secs")
     
-    y_opt = problem.calculate_state(u_opt).mean(axis=0)
+    y_opt = problem.calculate_state(u_opt)
 
     x = np.linspace(0.,1.,N)
     
     # plot state
     if method_state == "NN":
         # compare NN predicted state with numerical solution
-        plt.figure()
-        plt.plot(x, y_opt.ravel(), label="$\\tilde{y}(u^*)$")
-        plt.plot(x, problem.calculate_state_conventional(u_opt).ravel(), color="red", label="$y(u^*)$")
-        plt.title(model_name + ", " + method_state + " state, " + method_gradient)
+        plt.figure(figsize=figsize)
+        plt.plot(x, y_opt.mean(axis=0).ravel(), label="$\\tilde{y}(u^*)$")
+        y_opt_actual = problem.calculate_state_conventional(u_opt)[0]
+        plt.plot(x, y_opt_actual, label="$y(u^*)$", alpha=0.5)
+        plt.title("Optimal state " + model_name + " " + method_gradient.split(" ")[-1], fontsize="large")
+        print("R2 of mean = ", 1. - np.mean( np.mean((y_opt.mean(axis=0) - y_opt_actual)**2)/y_opt_actual.var()) )
+        print("R2 =", 1. - np.mean( np.mean((y_opt - y_opt_actual[None])**2, axis=(1,2))/y_opt_actual.var()), "+/-", np.std(1.- np.mean((y_opt - y_opt_actual[None])**2, axis=(1,2))/y_opt_actual.var()))
     else:
+        plt.figure(figsize=figsize)
         plt.plot(x, y_opt.ravel(), label="opt. state")
-        plt.title(method_state + " state, " + method_gradient)
+        plt.title("Optimal state", fontsize="large")
     plt.plot(x, y_d.ravel(), linestyle="--", label="$y_d$")
     plt.xlabel("$x$"); plt.ylabel("$y$"); plt.ylim([0.95, 1.65])
-    plt.legend()
+    plt.legend(loc="lower right")
+    plt.tight_layout()
+    if savefigs:
+        plt.savefig("Optimal_state_" + (model_name+"_")*(method_state!="conventional" and method_gradient!="conventional_adjoint") + method_state + "_" + method_gradient + ".pdf")
     plt.show()
     
     # plot optimal control
-    plt.figure()
+    plt.figure(figsize=figsize)
     plt.plot(x, u_opt.ravel(), label="$u^*$")
-    plt.title("Optimal control")
+    if method_state=="NN":
+        plt.title("Optimal control " + model_name + " " + method_gradient.split(" ")[-1], fontsize="large")
+    else:
+        plt.title("Optimal control", fontsize="large")
     plt.xlabel("$x$"); plt.ylabel("$u$")
     plt.legend()
+    plt.tight_layout()
+    if savefigs:
+        plt.savefig("Optimal_control_" + (model_name+"_")*(method_state!="conventional" and method_gradient!="conventional_adjoint") + method_state + "_" + method_gradient + ".pdf")
     plt.show()
     
     # plot adjoint
@@ -282,28 +297,32 @@ if __name__ == "__main__":
         p_opt = problem.calculate_adjoint(y_opt).mean(axis=0)
         if method_gradient == "NN adjoint":
             # compare NN predicted state with numerical solution
-            plt.figure()
+            plt.figure(figsize=figsize)
             plt.plot(x, p_opt.ravel(), label="$\\tilde{p}(u^*)$")
-            y_actual = problem.calculate_state_conventional(u_opt)
-            plt.plot(x, problem.calculate_adjoint_conventional(y_actual).ravel(), color="red", label="$p(u^*)$")
-            plt.title(model_name + ", " + method_state + " state, " + method_gradient)
+            y_opt_actual = problem.calculate_state_conventional(u_opt)
+            plt.plot(x, problem.calculate_adjoint_conventional(y_opt_actual).ravel(), color="red", label="$p(u^*)$")
+            plt.title(model_name + ", " + method_state + " state, " + method_gradient, fontsize="large")
         else:
+            plt.figure(figsize=figsize)
             plt.plot(x, p_opt.ravel(), label="adjoint p at opt. solution")
-            plt.title(method_state + " state, " + method_gradient)
+            plt.title(method_state + " state, " + method_gradient, fontsize="large")
         plt.xlabel("$x$"); plt.ylabel("$p$")#; plt.ylim([0.95, 1.65])
         plt.legend()
         plt.show()
     
     # plot cost history
-    plt.figure()
-    plt.plot(np.arange(len(cost_history)), cost_history)
+    plt.figure(figsize=figsize)
     if method_state == "NN":
+        plt.plot(np.arange(len(cost_history)), cost_history, label="$J(\\tilde{y},u)$")
         cost_history_true = []
         for u_ in u_history:
             y_ = problem.calculate_state_conventional(u_)
             cost_ = problem.cost(y_, u_)
             cost_history_true.append(cost_)
-        plt.plot(np.arange(len(cost_history_true)), cost_history_true, linestyle="--")
+        plt.plot(np.arange(len(cost_history_true)), cost_history_true, linestyle="--", label="$J(y, u)$")
+    else:
+        plt.plot(np.arange(len(cost_history)), cost_history, label="$J(y,u)$")
+    
     """else:
         problem.load_state_models(state_filename)
         def calculate_state(u):
@@ -328,9 +347,21 @@ if __name__ == "__main__":
             cost_ = 0.5*delta_x*np.sum((y_- y_d)**2) + 0.5*nu*delta_x*np.sum(u_**2)
             cost_history_true.append(cost_)
         plt.plot(np.arange(len(cost_history_true)), cost_history_true, linestyle="--")"""
-    plt.title("Cost")
+    if method_state=="conventional" and method_gradient=="conventional adjoint":
+        plt.title("Cost", fontsize="large")
+    elif method_state=="NN" and method_gradient=="NN adjoint":
+        plt.title("Cost {} adjoint".format(model_name), fontsize="large")
+    elif method_state=="NN" and method_gradient=="NN tangent":
+        plt.title("Cost {} tangent".format(model_name), fontsize="large")
+    else:
+        plt.title("Cost " + method_state + " state, " + method_gradient, fontsize="large")
     plt.yscale("log")
-    plt.xlabel("It. no."); plt.ylabel("$J(u)$")
+    plt.xlabel("Iteration"); plt.ylabel("$J$")
+    plt.xticks(np.arange(4 + 1)*max_no_iters//4)
+    plt.legend()
+    plt.tight_layout()
+    if savefigs:
+        plt.savefig("Cost_history_" + (model_name+"_")*(method_state!="conventional" and method_gradient!="conventional_adjoint") + method_state + "_" + method_gradient + ".pdf")
     plt.show()
     
     def taylor_test(J, u, h, J_derivative_h, rtol=1e-4):
