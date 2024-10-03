@@ -9,7 +9,7 @@ The models we trained and used are avaiable upon request.
 
 The repo is organised as follows.
 
-### Root folder
+## Root folder
 The root folder contains the following files:
 ##### `FNO.py`
 Define the class FNO (Fourier neural operator)
@@ -25,7 +25,7 @@ Sets the correct work environment so that imports in other files are handled cor
 
 There are also four sub-folders that contain the remaining code.
 
-### simple_scalar_problem
+## simple_scalar_problem
 This pertains to the scalar ODE that describes exponential decay with a source term:
 $$
 y' = -y + u
@@ -51,7 +51,7 @@ Loads pickled lists of training data and plots the loss history.
 ##### (other files)
 Deprecated but didn't want to remove from repo because they're my children and I love them.
 
-### heat_equation
+## heat_equation
 This pertains to the 1D heat equation:
 $$
 \frac{\partial y}{\partial t} = D\frac{\partial^2 y}{\partial x^2} + u
@@ -75,7 +75,7 @@ Performs the OC optimisation loop. Includes a class that contains the necessary 
 Loads pickled lists of training data and plots the loss history.
 
 
-### poisson
+## poisson
 This pertains to the 2D Poisson equation:
 $$
 \frac{\partial^2 y}{\partial x_1^2} + \frac{\partial^2 y}{\partial x_2^2} = - u
@@ -98,7 +98,7 @@ Performs the OC optimisation loop. Includes a class that contains the necessary 
 ##### `plotting_and_metrics.py`
 Loads pickled lists of training data and plots the loss history.
 
-### utils
+## utils
 This defines a lot of general functions used in other files, namely:
 
 ##### `training_routines.py`
